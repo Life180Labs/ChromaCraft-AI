@@ -1,0 +1,22 @@
+{
+  "name": "chromacraft-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "ts-node worker.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "bullmq": "^5.7.5",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "prisma": "^5.18.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

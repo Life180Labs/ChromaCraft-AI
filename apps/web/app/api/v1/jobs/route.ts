@@ -1,0 +1,58 @@
+import prisma from '../../../../lib/prisma';
+import { getUserId } from '../../../../lib/auth';
+import { NextResponse } from 'next/server';
+import { limiter } from '../../../../lib/rateLimit';
+
+export async function GET(request: Request) {
+  await limiter(request as any, {} as any, () => {});
+  const url = new URL(request.url);
+  const userId = await getUserId(request as any);
+  if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const jobs = await prisma.job.findMany({
+    where: { userId: Number(userId) },
+    include: { assets: true }
+  });
+  return NextResponse.json(jobs);
+}
+
+export async function POST(request: Request) {
+  await limiter(request as any, {} as any, () => {});
+  const userId = await getUserId(request as any);
+  if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const { name, prompt } = await request.json();
+  const job = await prisma.job.create({
+    data: {
+      name: name || 'Untitled',
+      user: { connect: { id: Number(userId) } },
+      prompt: prompt ? { create: { name: 'default', content: prompt } } : undefined,
+    },
+  });
+  return NextResponse.json(job, { status: 201 });
+}
+
+export async function PUT(request: Request) {
+  await limiter(request as any, {} as any, () => {});
+  const userId = await getUserId(request as any);
+  if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const { id, status } = await request.json();
+  const job = await prisma.job.update({
+    where: { id, userId: Number(userId) },
+    data: { status },
+  });
+  return NextResponse.json(job);
+}
+
+export async function DELETE(request: Request) {
+  await limiter(request as any, {} as any, () => {});
+  const userId = await getUserId(request as any);
+  if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const { id } = await request.json();
+  
+  await prisma.$transaction([
+    prisma.asset.deleteMany({ where: { jobId: Number(id) } }),
+    prisma.generation.deleteMany({ where: { jobId: Number(id) } }),
+    prisma.job.delete({ where: { id: Number(id), userId: Number(userId) } })
+  ]);
+  
+  return NextResponse.json({ message: 'Job deleted' });
+}

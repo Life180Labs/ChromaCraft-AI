@@ -1,0 +1,89 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  QA_PENDING
+  COMPLETED
+  FAILED
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  passwordHash  String
+  name          String?
+  role          Role           @default(USER)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  jobs          Job[]
+  passwordResets PasswordReset[]
+}
+
+model Job {
+  id          Int        @id @default(autoincrement())
+  name        String
+  status      JobStatus  @default(PENDING)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  userId      Int
+  user        User       @relation(fields: [userId], references: [id])
+  assets      Asset[]
+  promptId    Int?       @unique
+  prompt      PromptTemplate? @relation(fields: [promptId], references: [id])
+  generation  Generation?
+  providerId  Int?
+  provider    AiProvider? @relation(fields: [providerId], references: [id])
+}
+
+model Asset {
+  id        Int      @id @default(autoincrement())
+  type      String   // e.g., "original", "variant", "processed"
+  path      String
+  status    String   // e.g., "pending", "done", "error"
+  jobId     Int
+  job       Job      @relation(fields: [jobId], references: [id])
+}
+
+model PromptTemplate {
+  id        Int      @id @default(autoincrement())
+  name      String
+  content   String
+  job       Job?
+}
+
+model Generation {
+  id       Int      @id @default(autoincrement())
+  metadata Json?
+  jobId    Int      @unique
+  job      Job      @relation(fields: [jobId], references: [id])
+}
+
+model PasswordReset {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model AiProvider {
+  id      Int    @id @default(autoincrement())
+  name    String @unique
+  apiKey  String
+  default Boolean @default(false)
+  jobs    Job[]
+}

@@ -1,0 +1,2034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChromaCraft AI — by Life180 Labs</title>
+<!-- Fonts + Icons: loaded from CDN — requires internet connection -->
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+/* ═══════════════════════════════════════════
+   CHROMACRAFT AI v3 — Chalk Theme
+   Life180 Labs · 2026
+═══════════════════════════════════════════ */
+:root{
+  --bg:#faf8f4;--bg2:#f2efe8;--bg3:#e8e4db;--bg4:#ddd8ce;
+  --tx:#2c2820;--tx2:#6b6358;--tx3:#a09890;--tx4:#c8bfb4;
+  --bd:#ddd9d0;--bd2:#c8c3b8;--bd3:#b8b2a8;
+  --acc:#BA7517;--acc2:#633806;--acc3:#EF9F27;--acc-bg:#FAEEDA;--acc-tx:#633806;
+  --suc:#3B6D11;--suc-bg:#EAF3DE;--suc-tx:#27500A;
+  --err:#A32D2D;--err-bg:#FCEBEB;--err-tx:#791F1F;
+  --warn:#854F0B;--warn-bg:#FAEEDA;
+  --r:8px;--r-lg:12px;--r-xl:16px;
+  --shadow:0 1px 3px rgba(44,40,32,.06),0 4px 12px rgba(44,40,32,.04);
+  --shadow-lg:0 8px 32px rgba(44,40,32,.12);
+}
+body.night{
+  --bg:#18160f;--bg2:#211e14;--bg3:#2a2618;--bg4:#332e1e;
+  --tx:#f5f0e5;--tx2:#a89c88;--tx3:#706458;--tx4:#504840;
+  --bd:#302c1c;--bd2:#403a28;--bd3:#504840;
+  --acc:#EF9F27;--acc2:#FAC775;--acc3:#BA7517;--acc-bg:#412402;--acc-tx:#FAC775;
+  --suc:#97C459;--suc-bg:#173404;--suc-tx:#C0DD97;
+  --err:#F09595;--err-bg:#501313;--err-tx:#F7C1C1;
+  --shadow:0 1px 3px rgba(0,0,0,.3),0 4px 12px rgba(0,0,0,.2);
+  --shadow-lg:0 8px 32px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--tx);font-size:14px;line-height:1.6;min-height:100vh;transition:background .3s,color .3s}
+
+/* ══ PAGE SYSTEM ══ */
+.page{display:none}
+.page.active{display:block}
+
+/* ══ COVER PAGE ══ */
+.cover{height:100vh;overflow:hidden;display:grid;grid-template-columns:55% 45%}
+.cover-lhs{background:var(--acc2);padding:40px 44px;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.cover-lhs::before{content:'';position:absolute;top:-80px;right:-80px;width:320px;height:320px;border-radius:50%;background:rgba(255,255,255,.04);pointer-events:none}
+.cover-lhs::after{content:'';position:absolute;bottom:-60px;left:-60px;width:240px;height:240px;border-radius:50%;background:rgba(255,255,255,.03);pointer-events:none}
+.cover-logo{display:flex;align-items:center;gap:12px;margin-bottom:36px}
+.cover-logo-icon{width:40px;height:40px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.cover-logo-icon svg{width:24px;height:24px}
+.cover-logo-text{font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:500;color:#fff}
+.cover-logo-text span{color:var(--acc3)}
+.cover-tagline{font-family:'Playfair Display',Georgia,serif;font-size:26px;font-weight:500;color:#fff;line-height:1.25;margin-bottom:8px;position:relative;z-index:1}
+.cover-sub{font-size:12px;color:rgba(255,220,160,.7);margin-bottom:20px;position:relative;z-index:1}
+.cover-features{display:flex;flex-direction:column;gap:8px;margin-bottom:24px;position:relative;z-index:1}
+.cover-feat{display:flex;align-items:flex-start;gap:10px}
+.cover-feat-icon{width:28px;height:28px;background:rgba(255,255,255,.1);border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.cover-feat-icon i{font-size:14px;color:var(--acc3)}
+.cover-feat-text{font-size:12px;color:rgba(255,220,160,.85);line-height:1.5}
+.cover-feat-text strong{color:#fff;display:block;font-size:13px;margin-bottom:1px}
+.cover-compare{margin-top:auto;position:relative;z-index:1}
+.cover-compare-title{font-size:10px;font-weight:500;letter-spacing:.07em;color:rgba(255,220,160,.5);text-transform:uppercase;margin-bottom:8px}
+.ctable{width:100%;border-collapse:collapse;font-size:11px}
+.ctable th{color:rgba(255,220,160,.6);font-weight:500;padding:5px 8px;text-align:left;border-bottom:1px solid rgba(255,255,255,.08);font-size:10px}
+.ctable td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06);color:rgba(255,220,160,.8)}
+.ctable tr.us td{color:#fff;font-weight:500}
+.ctable tr.us td:first-child{color:var(--acc3)}
+.ctick{color:#97C459}
+.tcross{color:rgba(255,120,120,.7)}
+
+.cover-rhs{background:var(--bg2);padding:40px 44px;display:flex;flex-direction:column;justify-content:center}
+.auth-header{margin-bottom:28px}
+.auth-title{font-family:'Playfair Display',Georgia,serif;font-size:22px;font-weight:500;color:var(--tx);margin-bottom:4px}
+.auth-sub{font-size:13px;color:var(--tx3)}
+.auth-tabs{display:flex;gap:0;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:24px}
+.auth-tab{flex:1;padding:10px;font-size:13px;text-align:center;cursor:pointer;background:var(--bg2);color:var(--tx3);transition:all .15s;border:none;font-family:'DM Sans',sans-serif}
+.auth-tab.active{background:var(--acc);color:#fff;font-weight:500}
+.auth-panel{display:none}
+.auth-panel.active{display:block}
+.form-group{margin-bottom:16px}
+.form-group label{font-size:11px;color:var(--tx2);display:block;margin-bottom:5px;font-weight:500}
+.form-group input{width:100%;padding:10px 12px;font-size:13px;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--tx);outline:none;transition:border .15s}
+.form-group input:focus{border-color:var(--acc)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:18px 0;font-size:11px;color:var(--tx3)}
+.auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--bd)}
+.social-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
+.social-btn{display:flex;align-items:center;justify-content:center;gap:7px;padding:9px;font-size:12px;border:1px solid var(--bd);border-radius:var(--r);cursor:pointer;background:var(--bg);color:var(--tx2);transition:all .15s;font-family:'DM Sans',sans-serif}
+.social-btn:hover{border-color:var(--bd3);background:var(--bg2)}
+.form-footer{font-size:11px;color:var(--tx3);text-align:center;margin-top:14px}
+.form-footer a{color:var(--acc);cursor:pointer;text-decoration:none}
+.form-footer a:hover{color:var(--acc2)}
+.password-wrap{position:relative}
+.password-wrap input{padding-right:36px}
+.pw-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--tx3);cursor:pointer;padding:4px;font-size:16px}
+.pw-toggle:hover{color:var(--acc)}
+.forgot{font-size:11px;color:var(--acc);cursor:pointer;float:right;margin-top:-12px;margin-bottom:16px}
+.forgot:hover{color:var(--acc2)}
+.terms-check{display:flex;align-items:flex-start;gap:8px;margin-bottom:16px;font-size:11px;color:var(--tx3)}
+.terms-check input{margin-top:2px;accent-color:var(--acc);flex-shrink:0}
+
+/* ══ MAIN APP SHELL ══ */
+/* Topbar */
+.topbar{display:flex;align-items:center;background:var(--bg);border-bottom:1px solid var(--bd);padding:0 20px;position:sticky;top:0;z-index:200;gap:0;min-height:52px}
+.logo-btn{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 0;border-right:1px solid var(--bd);margin-right:2px;cursor:pointer;text-decoration:none;flex-shrink:0}
+.logo-icon-sm{width:26px;height:26px;background:var(--acc-bg);border-radius:7px;display:flex;align-items:center;justify-content:center}
+.logo-icon-sm svg{width:16px;height:16px}
+.logo-text-sm{font-family:'Playfair Display',Georgia,serif;font-size:14px;font-weight:500;color:var(--tx)}
+.logo-text-sm span{color:var(--acc)}
+.logo-by-sm{font-size:8px;color:var(--tx3);letter-spacing:.04em;margin-top:-2px}
+.nav-links{display:flex;align-items:center;gap:0;flex:1}
+.nav-tab{font-size:12px;padding:16px 13px;color:var(--tx3);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s;user-select:none;background:none;border-top:none;border-left:none;border-right:none;font-family:'DM Sans',sans-serif}
+.nav-tab:hover{color:var(--tx2)}
+.nav-tab.active{color:var(--acc);border-bottom-color:var(--acc);font-weight:500}
+.nav-tab.done{color:var(--suc)}
+.tab-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--bg3);color:var(--tx3);font-size:8px;margin-left:4px;font-weight:500}
+.nav-tab.active .tab-badge{background:var(--acc-bg);color:var(--acc-tx)}
+.topbar-right{display:flex;align-items:center;gap:8px;margin-left:auto}
+.home-btn{display:flex;align-items:center;gap:5px;font-size:11px;padding:6px 11px;border-radius:var(--r);border:1px solid var(--bd);background:var(--bg2);color:var(--tx2);cursor:pointer;transition:all .15s;white-space:nowrap}
+.home-btn:hover{border-color:var(--acc);color:var(--acc)}
+.night-btn{display:flex;align-items:center;gap:5px;font-size:11px;padding:6px 11px;border-radius:20px;border:1px solid var(--bd2);background:var(--bg2);color:var(--tx2);cursor:pointer;transition:all .15s}
+.night-btn:hover{border-color:var(--acc);color:var(--acc)}
+.user-btn{width:32px;height:32px;border-radius:50%;background:var(--acc-bg);border:1.5px solid var(--acc);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px;font-weight:500;color:var(--acc-tx);transition:all .15s;flex-shrink:0}
+.user-btn:hover{background:var(--acc);color:#fff}
+/* Mobile hamburger */
+.hamburger{display:none;padding:8px;border:none;background:none;cursor:pointer;color:var(--tx2);font-size:20px}
+.mobile-nav{display:none;background:var(--bg);border-bottom:1px solid var(--bd);padding:8px 16px 12px;flex-direction:column;gap:2px}
+.mobile-nav.open{display:flex}
+.mobile-nav .nav-tab{padding:10px 12px;border-bottom:none;border-radius:var(--r);text-align:left}
+.mobile-nav .nav-tab.active{background:var(--acc-bg)}
+
+/* ══ MAIN CONTENT ══ */
+.main{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+
+/* PROGRESS STEPPER */
+.stepper{display:flex;align-items:center;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-xl);padding:14px 18px;margin-bottom:24px;overflow-x:auto;scrollbar-width:none}
+.stepper::-webkit-scrollbar{display:none}
+.step-item{display:flex;flex-direction:column;align-items:center;flex:1;position:relative;min-width:60px}
+.step-item:not(:last-child)::after{content:'';position:absolute;top:12px;left:55%;width:90%;height:1px;background:var(--bd2);z-index:0}
+.step-item.done::after{background:var(--acc)}
+.step-dot{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--bd2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;background:var(--bg);color:var(--tx3);z-index:1;transition:all .3s}
+.step-item.active .step-dot{background:var(--acc);color:#fff;border-color:var(--acc)}
+.step-item.done .step-dot{background:var(--suc-bg);color:var(--suc);border-color:var(--suc)}
+.step-lbl{font-size:9px;color:var(--tx3);margin-top:4px;text-align:center;line-height:1.3;max-width:56px}
+.step-item.active .step-lbl{color:var(--acc);font-weight:500}
+.step-item.done .step-lbl{color:var(--suc)}
+
+/* SCREENS */
+.screen{display:none;animation:fadeIn .2s ease}
+.screen.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+
+/* SECTION LABEL */
+.sec{font-size:10px;font-weight:500;letter-spacing:.08em;color:var(--tx3);text-transform:uppercase;margin:20px 0 9px}
+.sec:first-child{margin-top:0}
+
+/* CARDS */
+.card{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-lg);padding:16px 18px;margin-bottom:12px;box-shadow:var(--shadow)}
+.card.dashed{border-style:dashed}
+.card.muted{opacity:.5;pointer-events:none}
+.card-head{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.card-head i{font-size:15px;color:var(--acc)}
+.card-title{font-size:13px;font-weight:500;color:var(--tx);flex:1}
+
+/* INDUSTRY GRID */
+.ind-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.ind-card{border:1.5px solid var(--bd);border-radius:var(--r);padding:11px 5px 9px;text-align:center;cursor:pointer;background:var(--bg2);transition:all .15s}
+.ind-card:hover,.ind-card.sel{border-color:var(--acc);background:var(--acc-bg)}
+.ind-card i{font-size:18px;color:var(--tx3);display:block;margin-bottom:4px;transition:color .15s}
+.ind-card:hover i,.ind-card.sel i{color:var(--acc-tx)}
+.ind-card span{font-size:10px;color:var(--tx2)}
+.ind-card.sel span{color:var(--acc-tx);font-weight:500}
+
+/* UPLOAD MODAL */
+.overlay{position:fixed;inset:0;background:rgba(44,40,32,.5);z-index:500;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-xl);padding:24px;width:460px;max-width:94vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);transform:translateY(8px);transition:transform .2s;position:relative}
+.overlay.open .modal{transform:none}
+.modal-title{font-family:'Playfair Display',Georgia,serif;font-size:16px;font-weight:500;color:var(--tx);margin-bottom:4px}
+.modal-sub{font-size:12px;color:var(--tx3);margin-bottom:18px}
+.modal-close{position:absolute;top:14px;right:14px;background:none;border:none;font-size:18px;color:var(--tx3);cursor:pointer;padding:4px;border-radius:var(--r)}
+.modal-close:hover{background:var(--bg3);color:var(--tx)}
+.upload-tabs{display:flex;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
+.upload-tab-btn{flex:1;padding:8px;font-size:12px;text-align:center;cursor:pointer;background:var(--bg2);color:var(--tx3);border:none;border-right:1px solid var(--bd);font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;transition:all .15s}
+.upload-tab-btn:last-child{border-right:none}
+.upload-tab-btn.active{background:var(--acc);color:#fff;font-weight:500}
+.upload-panel{display:none}
+.upload-panel.active{display:block}
+.drop-zone{border:2px dashed var(--bd2);border-radius:var(--r-lg);padding:28px 16px;text-align:center;background:var(--bg2);cursor:pointer;transition:all .2s}
+.drop-zone:hover{border-color:var(--acc);background:var(--acc-bg)}
+.drop-zone i{font-size:32px;color:var(--tx3);display:block;margin-bottom:7px}
+.drop-zone p{font-size:12px;color:var(--tx2);margin-bottom:3px}
+.drop-zone small{font-size:10px;color:var(--tx3)}
+.url-row{display:flex;gap:8px;margin-top:6px}
+.url-row input{flex:1;padding:8px 11px;font-size:12px;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--tx);outline:none}
+.url-row input:focus{border-color:var(--acc)}
+.cloud-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cloud-opt{border:1px solid var(--bd);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;background:var(--bg2);transition:all .15s}
+.cloud-opt:hover{border-color:var(--acc);background:var(--acc-bg)}
+.cloud-opt i{font-size:22px;color:var(--tx3)}
+.cloud-opt span{font-size:11px;color:var(--tx2)}
+.hidden-file{display:none}
+
+/* UZONE */
+.uzone{border:2px dashed var(--bd2);border-radius:var(--r-lg);padding:22px 16px;text-align:center;background:var(--bg2);cursor:pointer;transition:all .2s}
+.uzone:hover{border-color:var(--acc);background:var(--acc-bg)}
+.uzone.done{border-color:var(--suc);background:var(--suc-bg);border-style:solid;cursor:default}
+.uzone i{font-size:28px;color:var(--tx3);display:block;margin-bottom:6px}
+.uzone.done i{color:var(--suc)}
+.uzone p{font-size:12px;color:var(--tx2)}
+.uzone small{font-size:10px;color:var(--tx3);display:block;margin-top:3px}
+
+/* SMART Q's */
+.sq{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-lg);padding:13px 15px;margin-bottom:9px}
+.sq-label{font-size:13px;font-weight:500;color:var(--tx);margin-bottom:9px}
+.sq-opts{display:flex;gap:6px;flex-wrap:wrap}
+.sq-opt{font-size:11px;padding:5px 11px;border-radius:20px;border:1px solid var(--bd2);cursor:pointer;background:var(--bg);color:var(--tx2);transition:all .15s;user-select:none}
+.sq-opt:hover{border-color:var(--acc);background:var(--acc-bg);color:var(--acc-tx)}
+.sq-opt.sel{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:500}
+
+/* GRID EDITOR */
+.grid-editor{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 0 4px}
+.dim-ctrl{display:flex;align-items:center;gap:6px}
+.dim-ctrl label{font-size:11px;color:var(--tx3)}
+.dim-btn{width:28px;height:28px;border:1px solid var(--bd2);border-radius:var(--r);background:var(--bg2);color:var(--tx2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.dim-btn:hover{border-color:var(--acc);color:var(--acc)}
+.dim-val{font-size:14px;font-weight:500;color:var(--tx);min-width:18px;text-align:center}
+.grid-mini{display:grid;gap:3px}
+.grid-mini-cell{width:11px;height:8px;background:var(--acc-bg);border:1px solid var(--acc);border-radius:2px}
+
+/* STEP TOGGLES */
+.step-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd)}
+.step-row:last-child{border-bottom:none;padding-bottom:0}
+.step-row:first-child{padding-top:0}
+.step-ico{width:30px;height:30px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.step-ico.on{background:var(--acc-bg)}
+.step-ico.off{background:var(--bg3)}
+.step-ico i{font-size:15px}
+.step-ico.on i{color:var(--acc-tx)}
+.step-ico.off i{color:var(--tx3)}
+.step-info{flex:1}
+.step-name{font-size:12px;font-weight:500;color:var(--tx)}
+.step-desc{font-size:11px;color:var(--tx3);margin-top:1px}
+.step-cost{font-size:10px;color:var(--tx3);white-space:nowrap}
+.toggle{width:34px;height:19px;border-radius:10px;border:none;cursor:pointer;position:relative;flex-shrink:0;transition:background .2s}
+.toggle.on{background:var(--acc)}
+.toggle.off{background:var(--bd3)}
+.toggle::after{content:'';position:absolute;top:2.5px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .2s}
+.toggle.on::after{left:17px}
+.toggle.off::after{left:2.5px}
+
+/* COST BAR */
+.cost-bar{display:flex;align-items:center;gap:14px;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:9px 14px;margin-bottom:12px;flex-wrap:wrap}
+.ci{font-size:11px;color:var(--tx3)}
+.ci strong{color:var(--tx);font-weight:500}
+.ci.total{font-weight:500;color:var(--acc2);margin-left:auto}
+
+/* PROMPT */
+.prompt-box{font-family:'DM Mono','Courier New',monospace;font-size:11px;line-height:1.8;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:11px 13px;color:var(--tx2);white-space:pre-wrap;min-height:68px;width:100%}
+.ptag{background:var(--acc-bg);color:var(--acc-tx);border-radius:3px;padding:1px 4px;font-size:10px}
+.prompt-editor-area{width:100%;min-height:120px;padding:11px 13px;font-family:'DM Mono','Courier New',monospace;font-size:11px;line-height:1.8;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--tx);resize:vertical;outline:none;transition:border .15s}
+.prompt-editor-area:focus{border-color:var(--acc)}
+
+/* PROMPT MODAL */
+.prompt-modal{width:640px;max-width:96vw}
+.guided-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.guided-chip{font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid var(--bd2);cursor:pointer;background:var(--bg2);color:var(--tx2);transition:all .15s}
+.guided-chip:hover{border-color:var(--acc);background:var(--acc-bg);color:var(--acc-tx)}
+.guided-chip.sel{background:var(--acc);color:#fff;border-color:var(--acc)}
+.suggestion-pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.sug-pill{font-size:10px;padding:4px 9px;background:var(--acc-bg);color:var(--acc-tx);border-radius:20px;border:1px solid var(--acc);cursor:pointer;transition:all .15s}
+.sug-pill:hover{background:var(--acc);color:#fff}
+.lib-select-list{max-height:180px;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--r);background:var(--bg2)}
+.lib-select-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--bd);cursor:pointer;transition:background .15s}
+.lib-select-item:last-child{border-bottom:none}
+.lib-select-item:hover{background:var(--acc-bg)}
+.lib-select-item.sel{background:var(--acc-bg);border-left:3px solid var(--acc)}
+.lib-item-name{font-size:12px;font-weight:500;color:var(--tx);flex:1}
+.lib-item-meta{font-size:10px;color:var(--tx3)}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;padding:7px 13px;border-radius:var(--r);cursor:pointer;border:1px solid var(--bd2);background:var(--bg);color:var(--tx);transition:all .15s;white-space:nowrap}
+.btn:hover{border-color:var(--bd3);background:var(--bg2)}
+.btn.primary{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:500}
+.btn.primary:hover{background:var(--acc2)}
+.btn.outline{border-color:var(--acc);color:var(--acc);background:transparent}
+.btn.outline:hover{background:var(--acc-bg)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--tx3)}
+.btn.ghost:hover{background:var(--bg2);color:var(--tx)}
+.btn.sm{font-size:11px;padding:5px 10px}
+.btn.danger-outline{border-color:var(--err);color:var(--err);background:transparent}
+.btn.danger-outline:hover{background:var(--err-bg)}
+.btn-row{display:flex;gap:7px;flex-wrap:wrap}
+
+/* BADGES */
+.badge{font-size:10px;font-weight:500;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.b-green{background:var(--suc-bg);color:var(--suc-tx)}
+.b-amber{background:var(--warn-bg);color:var(--warn)}
+.b-gray{background:var(--bg3);color:var(--tx2);border:1px solid var(--bd)}
+.b-red{background:var(--err-bg);color:var(--err-tx)}
+
+/* NOTICE */
+.notice{border-left:3px solid var(--acc3);border-radius:0 var(--r) var(--r) 0;background:var(--acc-bg);padding:8px 12px;font-size:11px;color:var(--acc-tx);margin-bottom:11px}
+.notice.info{border-color:#378ADD;background:#E6F1FB;color:#0C447C}
+.notice.ok{border-color:var(--suc);background:var(--suc-bg);color:var(--suc-tx)}
+.notice.err{border-color:var(--err);background:var(--err-bg);color:var(--err-tx)}
+
+/* GRIDS */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+.field{margin-bottom:11px}
+.field label{font-size:11px;color:var(--tx2);display:block;margin-bottom:4px;font-weight:500}
+.field input,.field select,.field textarea{width:100%;padding:8px 11px;font-size:12px;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--tx);outline:none;transition:border .15s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--acc)}
+.field textarea{resize:vertical;min-height:80px}
+
+/* DIVIDER */
+.divider{height:1px;background:var(--bd);margin:12px 0}
+
+/* INFO TOOLTIP */
+.info-btn{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--bd2);background:var(--bg2);color:var(--tx3);font-size:9px;cursor:pointer;margin-left:4px;vertical-align:middle;font-style:normal;font-weight:500;position:relative;flex-shrink:0}
+.info-btn:hover{border-color:var(--acc);color:var(--acc)}
+.tooltip{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:var(--tx);color:var(--bg);font-size:11px;line-height:1.5;padding:9px 12px;border-radius:var(--r);width:220px;z-index:400;pointer-events:none;opacity:0;transition:opacity .15s;white-space:normal;text-align:left;font-family:'DM Sans',sans-serif}
+.tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:var(--tx)}
+.info-btn:hover .tooltip{opacity:1}
+
+/* GENERATE SCREEN */
+.progress-wrap{background:var(--bd);border-radius:4px;height:5px;margin:7px 0;overflow:hidden}
+.progress-fill{height:100%;background:var(--acc);border-radius:4px;transition:width .4s ease}
+
+/* Color variant grid (the actual product display) */
+.variant-grid-display{display:grid;gap:8px;margin-top:10px}
+.variant-cell{border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;position:relative;cursor:pointer;transition:all .2s}
+.variant-cell:hover{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-bg)}
+.variant-cell.pending{background:var(--bg2)}
+.variant-cell.generating{border-style:dashed;border-color:var(--acc3);background:var(--bg2)}
+.variant-cell.done{border-color:var(--suc);background:linear-gradient(to bottom,var(--bg2),var(--bg))}
+.variant-cell.error{border-color:var(--err);background:var(--err-bg)}
+.variant-cell.selected{border:2px solid var(--acc);box-shadow:0 0 0 3px var(--acc-bg)}
+.vc-swatch{height:6px;border-radius:0}
+.vc-body{padding:8px;display:flex;flex-direction:column;align-items:center;gap:4px;min-height:70px;justify-content:center}
+.vc-car{font-size:26px;color:var(--tx3);line-height:1;}
+.variant-cell.done .vc-car{color:var(--suc)}
+.variant-cell.error .vc-car{color:var(--err)}
+.vc-label{font-size:9px;color:var(--tx3);font-weight:500}
+.variant-cell.done .vc-label{color:var(--suc-tx)}
+.variant-cell.error .vc-label{color:var(--err-tx)}
+.vc-status{font-size:8px;color:var(--tx4)}
+.variant-cell.done .vc-status{color:var(--suc)}
+.variant-cell.error .vc-status{color:var(--err-tx)}
+.vc-color-btn{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(255,255,255,.7);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;background:rgba(255,255,255,.9);color:var(--tx2);opacity:0;transition:opacity .15s}
+.variant-cell:hover .vc-color-btn{opacity:1}
+.vc-fix-btn{position:absolute;bottom:4px;right:4px;font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--err);color:var(--err-tx);cursor:pointer;opacity:0;transition:opacity .15s}
+.variant-cell.error:hover .vc-fix-btn{opacity:1}
+
+/* Color per cell assignment */
+.cell-color-picker{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-lg);padding:10px;box-shadow:var(--shadow-lg);z-index:300;width:200px;display:none}
+.cell-color-picker.open{display:block}
+.ccp-title{font-size:10px;color:var(--tx3);margin-bottom:7px;font-weight:500}
+.ccp-swatches{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.ccp-swatch{width:22px;height:22px;border-radius:4px;border:1px solid var(--bd);cursor:pointer;transition:transform .1s}
+.ccp-swatch:hover{transform:scale(1.15)}
+.ccp-swatch.active{border:2px solid var(--tx)}
+.shade-sub{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px}
+.shade-sub-sw{width:18px;height:18px;border-radius:3px;border:1px solid var(--bd);cursor:pointer;transition:transform .1s}
+.shade-sub-sw:hover{transform:scale(1.15)}
+.shade-sub-sw.active{border:2px solid var(--acc)}
+.ccp-custom label{font-size:10px;color:var(--tx3);display:block;margin-bottom:3px}
+.ccp-custom input[type="color"]{width:100%;height:26px;border:1px solid var(--bd);border-radius:var(--r);cursor:pointer;background:var(--bg2);padding:2px}
+
+/* LIFESTYLE PREVIEW in generate */
+.lifestyle-preview-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.lp-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);aspect-ratio:3/2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.lp-card.done{background:var(--suc-bg);border-color:var(--suc)}
+.lp-card i{font-size:22px;color:var(--tx3)}
+.lp-card.done i{color:var(--suc)}
+.lp-card small{font-size:9px;color:var(--tx3);text-align:center}
+.lp-card.done small{color:var(--suc-tx)}
+
+/* FIX MODAL */
+.fix-modal-body .fix-opts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.fix-opt{font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid var(--bd2);cursor:pointer;background:var(--bg2);color:var(--tx2);transition:all .15s}
+.fix-opt:hover,.fix-opt.sel{background:var(--err);color:#fff;border-color:var(--err)}
+.shade-row-fix{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.shade-fix-sw{width:24px;height:24px;border-radius:4px;border:1.5px solid var(--bd);cursor:pointer;transition:transform .1s}
+.shade-fix-sw:hover{transform:scale(1.15)}
+.shade-fix-sw.active{border-color:var(--err-tx);transform:scale(1.08)}
+
+/* REVIEW */
+.review-grid{display:grid;gap:8px}
+.rv-cell{border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;position:relative;cursor:pointer;transition:all .15s}
+.rv-cell:hover{border-color:var(--acc)}
+.rv-cell.approved{border-color:var(--suc)}
+.rv-cell.flagged{border-color:var(--err);background:var(--err-bg)}
+.rv-cell.selected{border:2px solid var(--acc);box-shadow:0 0 0 2px var(--acc-bg)}
+.rv-swatch{height:5px}
+.rv-body{padding:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:64px;gap:3px}
+.rv-body i{font-size:22px;color:var(--tx3)}
+.rv-cell.approved .rv-body i{color:var(--suc)}
+.rv-cell.flagged .rv-body i{color:var(--err)}
+.rv-label{font-size:9px;color:var(--tx3);font-weight:500}
+.rv-cell.approved .rv-label{color:var(--suc-tx)}
+.rv-cell.flagged .rv-label{color:var(--err-tx)}
+.rv-fix-btn{position:absolute;bottom:3px;right:3px;font-size:8px;padding:2px 5px;border-radius:4px;background:var(--bg);border:1px solid var(--err);color:var(--err-tx);cursor:pointer;opacity:0;transition:opacity .15s}
+.rv-cell.flagged:hover .rv-fix-btn{opacity:1}
+.rv-check{position:absolute;top:4px;right:4px;width:16px;height:16px;border-radius:50%;background:var(--suc-bg);border:1px solid var(--suc);display:none;align-items:center;justify-content:center;font-size:9px;color:var(--suc)}
+.rv-cell.approved .rv-check{display:flex}
+
+/* LIFESTYLE REVIEW */
+.ls-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.ls-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);aspect-ratio:3/2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;transition:all .2s;position:relative}
+.ls-card:hover{border-color:var(--acc)}
+.ls-card.approved{background:var(--suc-bg);border-color:var(--suc)}
+.ls-card i{font-size:22px;color:var(--tx3)}
+.ls-card.approved i{color:var(--suc)}
+.ls-card small{font-size:9px;color:var(--tx3);text-align:center}
+.ls-card.approved small{color:var(--suc-tx)}
+
+/* COST TABLE */
+.cost-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.cost-tbl th{font-size:10px;font-weight:500;color:var(--tx3);text-align:left;padding:7px 11px;border-bottom:1px solid var(--bd);background:var(--bg2);text-transform:uppercase;letter-spacing:.04em}
+.cost-tbl td{padding:8px 11px;border-bottom:1px solid var(--bd);color:var(--tx)}
+.cost-tbl tr:last-child td{border-bottom:none}
+.cost-tbl tr.us td{background:var(--acc-bg)}
+.cost-tbl tr.us td:first-child{color:var(--acc-tx);font-weight:500}
+.cost-tbl .gn{color:var(--suc);font-weight:500}
+
+/* SAVINGS BANNER */
+.sav-banner{background:var(--acc2);border-radius:var(--r-xl);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.sav-item .sav-lbl{font-size:9px;color:rgba(255,220,160,.65);letter-spacing:.04em;margin-bottom:1px}
+.sav-item .sav-val{font-size:20px;font-weight:500;color:#fff;font-family:'Playfair Display',serif}
+
+/* QA */
+.qa-row{display:flex;align-items:center;gap:7px;font-size:11px;padding:5px 0;border-bottom:1px solid var(--bd)}
+.qa-row:last-child{border-bottom:none}
+.qa-row.ok{color:var(--suc-tx)}
+.qa-row.warn{color:var(--warn)}
+.qa-row i{font-size:13px;flex-shrink:0}
+
+/* DELIVERY */
+.del-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--bd)}
+.del-row:last-child{border-bottom:none}
+.del-name{font-size:12px;color:var(--tx)}
+.del-meta{font-size:10px;color:var(--tx3);margin-top:1px}
+
+/* JOB HISTORY */
+.job-row{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--bd);cursor:pointer;transition:all .15s;border-radius:var(--r)}
+.job-row:last-child{border-bottom:none}
+.job-row:hover{background:var(--bg2);padding-left:7px;padding-right:7px;margin:0 -7px}
+.job-ico{width:32px;height:32px;border-radius:var(--r);background:var(--bg2);border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.job-ico i{font-size:15px;color:var(--tx3)}
+.job-info{flex:1}
+.job-name{font-size:12px;font-weight:500;color:var(--tx)}
+.job-meta{font-size:10px;color:var(--tx3);margin-top:1px}
+
+/* JOB DETAIL */
+.jd-back{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--acc);cursor:pointer;padding:4px 0;margin-bottom:12px}
+.jd-back:hover{color:var(--acc2)}
+.jd-grid{display:grid;gap:6px}
+.jd-cell{background:var(--suc-bg);border:1px solid var(--suc);border-radius:var(--r);overflow:hidden}
+.jd-cell-swatch{height:5px}
+.jd-cell-body{padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:52px;gap:2px}
+.jd-cell-body i{font-size:16px;color:var(--suc)}
+.jd-cell-body small{font-size:8px;color:var(--suc-tx)}
+
+/* USER PROFILE */
+.profile-avatar{width:72px;height:72px;border-radius:50%;background:var(--acc-bg);border:2px solid var(--acc);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:500;color:var(--acc-tx);flex-shrink:0}
+.profile-stat{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:12px 14px;text-align:center}
+.profile-stat-val{font-size:20px;font-weight:500;color:var(--acc);font-family:'Playfair Display',serif}
+.profile-stat-lbl{font-size:10px;color:var(--tx3);margin-top:2px}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)}
+.settings-row:last-child{border-bottom:none}
+.settings-label{font-size:12px;color:var(--tx);font-weight:500}
+.settings-desc{font-size:11px;color:var(--tx3);margin-top:1px}
+
+/* GEN LOG */
+.gen-log{font-family:'DM Mono','Courier New',monospace;font-size:10px;color:var(--tx3);line-height:2;white-space:pre-wrap}
+.gen-log .ok{color:var(--suc-tx);font-weight:500}
+.gen-log .skip{color:var(--tx4)}
+
+/* TOAST */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--tx);color:var(--bg);font-size:12px;padding:9px 14px;border-radius:var(--r);z-index:999;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;display:flex;align-items:center;gap:6px;max-width:280px}
+.toast.show{opacity:1;transform:none}
+
+/* FOOTER */
+.footer{display:flex;align-items:center;justify-content:space-between;padding:14px 0 0;border-top:1px solid var(--bd);margin-top:24px;flex-wrap:wrap;gap:8px}
+.footer-left{font-size:11px;color:var(--tx3)}
+.footer-left strong{font-family:'Playfair Display',Georgia,serif;color:var(--tx2);font-weight:500}
+.footer-right{display:flex;gap:14px}
+.footer-link{font-size:11px;color:var(--tx3);cursor:pointer;text-decoration:none;transition:color .15s}
+.footer-link:hover{color:var(--acc)}
+
+/* ANIM */
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.spin{animation:spin 1s linear infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.pulse{animation:pulse 1.4s ease infinite}
+
+/* ══ RESPONSIVE ══ */
+@media(max-width:768px){
+  .cover{grid-template-columns:1fr;min-height:auto}
+  .cover-lhs{padding:28px 20px;min-height:auto}
+  .cover-compare{display:none}
+  .cover-tagline{font-size:22px}
+  .cover-rhs{padding:28px 20px}
+  .nav-links{display:none}
+  .hamburger{display:flex}
+  .main{padding:16px 14px 48px}
+  .ind-grid{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:1fr}
+  .g3{grid-template-columns:1fr 1fr}
+  .form-row{grid-template-columns:1fr}
+  .sav-banner{flex-direction:column;align-items:flex-start}
+  .ls-grid{grid-template-columns:1fr 1fr}
+  .lifestyle-preview-strip{grid-template-columns:1fr 1fr}
+  .stepper{padding:12px 14px}
+}
+@media(max-width:480px){
+  .g3{grid-template-columns:1fr}
+  .ls-grid{grid-template-columns:1fr}
+  .lifestyle-preview-strip{grid-template-columns:1fr}
+  .cover-tagline{font-size:22px}
+  .topbar{padding:0 12px}
+}
+</style>
+<!-- ══════════════════════════════════════════
+     PAGE 1: COVER / AUTH
+══════════════════════════════════════════ -->
+<div class="page active" id="page-cover">
+<div class="cover">
+
+  <!-- LHS: Brand + Features + Comparison -->
+  <div class="cover-lhs">
+    <div class="cover-logo">
+      <div class="cover-logo-icon">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="1" y="5" width="22" height="14" rx="3" stroke="rgba(255,255,255,.8)" stroke-width="1.5"/>
+          <rect x="4" y="8" width="4" height="8" rx="1.5" fill="rgba(255,200,80,.9)"/>
+          <rect x="10" y="8" width="4" height="8" rx="1.5" fill="rgba(255,200,80,.65)"/>
+          <rect x="16" y="8" width="4" height="8" rx="1.5" fill="rgba(255,200,80,.4)"/>
+        </svg>
+      </div>
+      <div>
+        <div class="cover-logo-text">Chroma<span>Craft</span> AI</div>
+        <div style="font-size:9px;color:rgba(255,220,160,.45);letter-spacing:.05em;margin-top:1px;">by Life180 Labs</div>
+      </div>
+    </div>
+
+    <div class="cover-tagline">Product imagery.<br>Fraction of the cost.</div>
+    <div class="cover-sub">AI color variants, lifestyle scenes &amp; videos — minutes, not days.</div>
+
+    <div class="cover-features">
+      <div class="cover-feat">
+        <div class="cover-feat-icon"><i class="ti ti-bolt"></i></div>
+        <div class="cover-feat-text"><strong>99% cheaper</strong>12 variants for $0.91 vs $285 at an agency</div>
+      </div>
+      <div class="cover-feat">
+        <div class="cover-feat-icon"><i class="ti ti-clock"></i></div>
+        <div class="cover-feat-text"><strong>9 minutes</strong>Full batch, QA, named files — automated end to end</div>
+      </div>
+      <div class="cover-feat">
+        <div class="cover-feat-icon"><i class="ti ti-world"></i></div>
+        <div class="cover-feat-text"><strong>Market-aware</strong>India, MENA, NA — right scenes, right people</div>
+      </div>
+    </div>
+
+    <div class="cover-compare">
+      <div class="cover-compare-title">vs the alternatives</div>
+      <table class="ctable">
+        <thead>
+          <tr><th>Provider</th><th>Cost</th><th>Time</th><th>Scale</th></tr>
+        </thead>
+        <tbody>
+          <tr class="us"><td>⚡ ChromaCraft AI</td><td>$0.91</td><td>9 min</td><td class="ctick">✓</td></tr>
+          <tr><td>Agency</td><td>$250–350</td><td>5–7 days</td><td class="tcross">✗</td></tr>
+          <tr><td>Freelancer</td><td>$60–100</td><td>2–4 days</td><td class="tcross">~</td></tr>
+          <tr><td>DIY</td><td>8–16 hrs</td><td>1–2 days</td><td class="tcross">✗</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- RHS: Auth -->
+  <div class="cover-rhs">
+    <div class="auth-header">
+      <div class="auth-title">Welcome</div>
+      <div class="auth-sub">Sign in to your account or create a new one</div>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab('login',this)">Sign in</button>
+      <button class="auth-tab" onclick="switchAuthTab('signup',this)">Create account</button>
+    </div>
+
+    <!-- LOGIN PANEL -->
+    <div class="auth-panel active" id="auth-login">
+      <div class="social-btns">
+        <button class="social-btn" onclick="socialLogin('Google')"><i class="ti ti-brand-google" style="color:#4285F4;font-size:16px;"></i> Google</button>
+        <button class="social-btn" onclick="socialLogin('Microsoft')"><i class="ti ti-brand-windows" style="color:#00A4EF;font-size:16px;"></i> Microsoft</button>
+      </div>
+      <div class="auth-divider">or sign in with email</div>
+      <div class="form-group">
+        <label>Email address</label>
+        <input type="email" id="login-email" placeholder="you@company.com" value="anirban@life180labs.com">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <div class="password-wrap">
+          <input type="password" id="login-pw" placeholder="••••••••" value="password">
+          <button class="pw-toggle" onclick="togglePw('login-pw',this)" type="button"><i class="ti ti-eye"></i></button>
+        </div>
+      </div>
+      <div class="forgot" onclick="showToast('Password reset email sent')">Forgot password?</div>
+      <button class="btn primary" style="width:100%;justify-content:center;padding:10px;" onclick="doLogin()"><i class="ti ti-login"></i> Sign in</button>
+      <div class="form-footer">Don't have an account? <a onclick="switchAuthTab('signup',document.querySelectorAll('.auth-tab')[1])">Create one free</a></div>
+    </div>
+
+    <!-- SIGNUP PANEL -->
+    <div class="auth-panel" id="auth-signup">
+      <div class="social-btns">
+        <button class="social-btn" onclick="socialLogin('Google')"><i class="ti ti-brand-google" style="color:#4285F4;font-size:16px;"></i> Google</button>
+        <button class="social-btn" onclick="socialLogin('Microsoft')"><i class="ti ti-brand-windows" style="color:#00A4EF;font-size:16px;"></i> Microsoft</button>
+      </div>
+      <div class="auth-divider">or sign up with email</div>
+      <div class="form-row">
+        <div class="form-group"><label>First name</label><input type="text" placeholder="Anirban" value="Anirban"></div>
+        <div class="form-group"><label>Last name</label><input type="text" placeholder="G" value="G"></div>
+      </div>
+      <div class="form-group"><label>Work email</label><input type="email" placeholder="you@company.com"></div>
+      <div class="form-group"><label>Company / brand</label><input type="text" placeholder="Life180 Labs"></div>
+      <div class="form-group">
+        <label>Password</label>
+        <div class="password-wrap">
+          <input type="password" id="signup-pw" placeholder="Min 8 characters">
+          <button class="pw-toggle" onclick="togglePw('signup-pw',this)" type="button"><i class="ti ti-eye"></i></button>
+        </div>
+      </div>
+      <div class="terms-check">
+        <input type="checkbox" id="terms-cb" checked>
+        <label for="terms-cb">I agree to the <a style="color:var(--acc);cursor:pointer;">Terms of Service</a> and <a style="color:var(--acc);cursor:pointer;">Privacy Policy</a></label>
+      </div>
+      <button class="btn primary" style="width:100%;justify-content:center;padding:10px;" onclick="doLogin()"><i class="ti ti-user-plus"></i> Create free account</button>
+      <div class="form-footer">Already have an account? <a onclick="switchAuthTab('login',document.querySelectorAll('.auth-tab')[0])">Sign in</a></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PAGE 2: APP SHELL
+══════════════════════════════════════════ -->
+<div class="page" id="page-app">
+
+<!-- TOPBAR -->
+<nav class="topbar">
+  <div class="logo-btn" onclick="goTab('home')">
+    <div class="logo-icon-sm">
+      <svg viewBox="0 0 16 16" fill="none">
+        <rect x="1" y="3" width="14" height="10" rx="2" stroke="var(--acc)" stroke-width="1.2"/>
+        <rect x="2.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".9"/>
+        <rect x="6.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".65"/>
+        <rect x="10.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".4"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-text-sm">Chroma<span>Craft</span></div>
+      <div class="logo-by-sm">by Life180 Labs</div>
+    </div>
+  </div>
+
+  <div class="nav-links" id="nav-links">
+    <button class="nav-tab active" id="tab-home" onclick="goTab('home')"><i class="ti ti-home" style="font-size:13px;vertical-align:-2px;margin-right:3px;"></i>Home</button>
+    <button class="nav-tab" id="tab-setup" onclick="goTab('setup')">New Job <span class="tab-badge">+</span></button>
+    <button class="nav-tab" id="tab-generate" onclick="goTab('generate')">Generate</button>
+    <button class="nav-tab" id="tab-review" onclick="goTab('review')">Review</button>
+    <button class="nav-tab" id="tab-deliver" onclick="goTab('deliver')">Deliver</button>
+    <button class="nav-tab" id="tab-history" onclick="goTab('history')">Jobs</button>
+  </div>
+
+  <div class="topbar-right">
+    <button class="night-btn" onclick="toggleNight()" id="night-btn"><i class="ti ti-moon" id="night-icon"></i><span id="night-lbl" class="hide-xs">Night</span></button>
+    <button class="user-btn" onclick="goTab('profile')" id="user-avatar" title="Profile & settings">AG</button>
+    <button class="hamburger" onclick="toggleMobileNav()" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+  </div>
+</nav>
+
+<div class="mobile-nav" id="mobile-nav">
+  <button class="nav-tab" onclick="goTab('home');closeMobileNav()"><i class="ti ti-home" style="font-size:13px;vertical-align:-2px;margin-right:4px;"></i>Home</button>
+  <button class="nav-tab" onclick="goTab('setup');closeMobileNav()">New Job</button>
+  <button class="nav-tab" onclick="goTab('generate');closeMobileNav()">Generate</button>
+  <button class="nav-tab" onclick="goTab('review');closeMobileNav()">Review</button>
+  <button class="nav-tab" onclick="goTab('deliver');closeMobileNav()">Deliver</button>
+  <button class="nav-tab" onclick="goTab('history');closeMobileNav()">Jobs</button>
+  <button class="nav-tab" onclick="goTab('profile');closeMobileNav()">Profile &amp; Settings</button>
+</div>
+
+<main class="main">
+
+<!-- Stepper (shown on relevant screens) -->
+<div id="stepper-wrap" style="display:none;">
+  <div class="stepper" id="stepper"></div>
+</div>
+
+<!-- ════════════ HOME ════════════ -->
+<div class="screen active" id="screen-home">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
+    <div>
+      <div style="font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:500;color:var(--tx);">Good morning, Anirban 👋</div>
+      <div style="font-size:12px;color:var(--tx3);margin-top:2px;">Life180 Labs · Free plan · <a style="color:var(--acc);cursor:pointer;">Upgrade</a></div>
+    </div>
+    <button class="btn primary" onclick="goTab('setup')"><i class="ti ti-plus"></i> New job</button>
+  </div>
+
+  <div class="g3" style="margin-bottom:20px;">
+    <div class="profile-stat"><div class="profile-stat-val">4</div><div class="profile-stat-lbl">Jobs this month</div></div>
+    <div class="profile-stat"><div class="profile-stat-val">33</div><div class="profile-stat-lbl">Images generated</div></div>
+    <div class="profile-stat"><div class="profile-stat-val" style="color:var(--suc);">$650</div><div class="profile-stat-lbl">Saved vs agency</div></div>
+  </div>
+
+  <div class="sec">Recent jobs</div>
+  <div class="card">
+    <div class="job-row" onclick="openJobDetail('asx')">
+      <div class="job-ico"><i class="ti ti-car"></i></div>
+      <div class="job-info"><div class="job-name">Mitsubishi ASX · 12 variants</div><div class="job-meta">Today · India · catalog · $0.91</div></div>
+      <span class="badge b-green">Done</span>
+    </div>
+    <div class="job-row" onclick="openJobDetail('rizta')">
+      <div class="job-ico"><i class="ti ti-motorbike"></i></div>
+      <div class="job-info"><div class="job-name">Ather Rizta · lifestyle + video</div><div class="job-meta">May 18 · India · social · $1.42</div></div>
+      <span class="badge b-green">Done</span>
+    </div>
+    <div class="job-row" onclick="openJobDetail('sony')">
+      <div class="job-ico"><i class="ti ti-device-laptop"></i></div>
+      <div class="job-info"><div class="job-name">Sony Bravia X90 · 8 variants</div><div class="job-meta">May 15 · MENA · dealer · $0.61</div></div>
+      <span class="badge b-green">Done</span>
+    </div>
+    <div class="divider"></div>
+    <button class="btn ghost sm" onclick="goTab('history')">View all jobs <i class="ti ti-arrow-right"></i></button>
+  </div>
+
+  <div class="sec">Quick start</div>
+  <div class="g2">
+    <div class="card" style="cursor:pointer;" onclick="goTab('setup')">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:36px;height:36px;background:var(--acc-bg);border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="ti ti-sparkles" style="color:var(--acc-tx);font-size:18px;"></i></div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--tx);">New job</div><div style="font-size:11px;color:var(--tx3);">Upload a product &amp; generate</div></div>
+      </div>
+    </div>
+    <div class="card" style="cursor:pointer;" onclick="goTab('history')">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:36px;height:36px;background:var(--bg3);border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="ti ti-history" style="color:var(--tx3);font-size:18px;"></i></div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--tx);">Job history</div><div style="font-size:11px;color:var(--tx3);">Re-run or download past work</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ SETUP ════════════ -->
+<div class="screen" id="screen-setup">
+
+  <div class="sec">Step 1 — Industry</div>
+  <div class="card">
+    <div class="ind-grid">
+      <div class="ind-card sel" onclick="selInd(this,'Automotive')"><i class="ti ti-car"></i><span>Automotive</span></div>
+      <div class="ind-card" onclick="selInd(this,'2-Wheeler')"><i class="ti ti-motorbike"></i><span>2-Wheeler</span></div>
+      <div class="ind-card" onclick="selInd(this,'Electronics')"><i class="ti ti-device-laptop"></i><span>Electronics</span></div>
+      <div class="ind-card" onclick="selInd(this,'Furniture')"><i class="ti ti-armchair"></i><span>Furniture</span></div>
+      <div class="ind-card" onclick="selInd(this,'Apparel')"><i class="ti ti-hanger"></i><span>Apparel</span></div>
+    </div>
+  </div>
+
+  <div class="sec">Step 2 — Product image</div>
+  <div class="card">
+    <div class="uzone" id="uzone" onclick="openUploadModal()">
+      <i class="ti ti-cloud-upload" id="uzone-icon"></i>
+      <p id="uzone-text">Click to upload — device, URL, or cloud</p>
+      <small id="uzone-sub">PNG · JPG · min 800×600 · or product page URL</small>
+    </div>
+    <div class="divider"></div>
+    <div class="g2">
+      <div class="field"><label>Product / model name</label><input type="text" id="model-name" value="Mitsubishi ASX" oninput="onModelInput(this)"></div>
+      <div class="field"><label>Output filename prefix</label><input type="text" id="file-prefix" value="Mitsubishi_ASX"></div>
+    </div>
+  </div>
+
+  <div class="sec">Step 3 — Targeting</div>
+  <div class="sq">
+    <div class="sq-label">Who is this for?</div>
+    <div class="sq-opts">
+      <div class="sq-opt sel" onclick="selOpt(this,this.parentNode)">General consumers</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Young urban buyers</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">B2B fleet</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Luxury</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Budget-conscious</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Families</div>
+    </div>
+  </div>
+  <div class="sq">
+    <div class="sq-label">Target market</div>
+    <div class="sq-opts">
+      <div class="sq-opt sel" onclick="selOpt(this,this.parentNode)">India</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">MENA</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">North America</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Southeast Asia</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Europe</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Global</div>
+    </div>
+  </div>
+  <div class="sq">
+    <div class="sq-label">Purpose</div>
+    <div class="sq-opts">
+      <div class="sq-opt sel" onclick="selOpt(this,this.parentNode)">Product catalog</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Social media</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Dealer / sales</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Print brochure</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Website hero</div>
+      <div class="sq-opt" onclick="selOpt(this,this.parentNode)">Paid ads</div>
+    </div>
+  </div>
+
+  <div class="sec">Step 4 — Output steps <span class="badge b-gray" style="vertical-align:middle;margin-left:5px;">Toggle to control cost</span></div>
+  <div class="card">
+    <div class="step-row">
+      <div class="step-ico on"><i class="ti ti-palette"></i></div>
+      <div class="step-info">
+        <div class="step-name">Color variant grid <span class="badge b-green" style="margin-left:5px;">Always on</span></div>
+        <div class="step-desc">
+          <span id="grid-desc">4 cols × 3 rows = 12 variants</span>
+          <div class="grid-editor">
+            <div class="dim-ctrl"><label>Cols</label><button class="dim-btn" onclick="adjGrid('c',-1)">−</button><span class="dim-val" id="cv">4</span><button class="dim-btn" onclick="adjGrid('c',1)">+</button></div>
+            <div class="dim-ctrl"><label>Rows</label><button class="dim-btn" onclick="adjGrid('r',-1)">−</button><span class="dim-val" id="rv">3</span><button class="dim-btn" onclick="adjGrid('r',1)">+</button></div>
+            <div class="grid-mini" id="grid-mini" style="grid-template-columns:repeat(4,11px);"></div>
+            <span style="font-size:11px;color:var(--tx3);" id="grid-total-lbl">12 images</span>
+          </div>
+        </div>
+      </div>
+      <div class="step-cost">~$0.60</div>
+      <div class="toggle on" style="cursor:default;opacity:.6;"></div>
+    </div>
+    <div class="step-row">
+      <div class="step-ico on"><i class="ti ti-eraser"></i></div>
+      <div class="step-info">
+        <div class="step-name">Background removal + PNG export <span class="badge b-green" style="margin-left:5px;">Always on</span></div>
+        <div class="step-desc">rembg → split → uniform sizing → auto-naming</div>
+      </div>
+      <div class="step-cost">~$0.05</div>
+      <div class="toggle on" style="cursor:default;opacity:.6;"></div>
+    </div>
+    <div class="step-row">
+      <div class="step-ico on" id="sico-life"><i class="ti ti-users"></i></div>
+      <div class="step-info">
+        <div class="step-name">Lifestyle / scene imagery <span class="badge b-gray" style="margin-left:5px;">Optional</span></div>
+        <div class="step-desc">People in context · ControlNet preserves proportions</div>
+      </div>
+      <div class="step-cost">~$0.30</div>
+      <button class="toggle on" id="tog-life" onclick="togStep('life',0.30)" aria-label="Toggle lifestyle"></button>
+    </div>
+    <div class="step-row">
+      <div class="step-ico off" id="sico-video"><i class="ti ti-video"></i></div>
+      <div class="step-info">
+        <div class="step-name">Promo video clip <span class="badge b-gray" style="margin-left:5px;">Optional</span></div>
+        <div class="step-desc">5–15 sec AI clip via Runway / Kling</div>
+      </div>
+      <div class="step-cost">~$0.50</div>
+      <button class="toggle off" id="tog-video" onclick="togStep('video',0.50)" aria-label="Toggle video"></button>
+    </div>
+    <div class="step-row">
+      <div class="step-ico off" id="sico-360"><i class="ti ti-rotate-360"></i></div>
+      <div class="step-info">
+        <div class="step-name">360° spin set <span class="badge b-gray" style="margin-left:5px;">Optional</span></div>
+        <div class="step-desc">8–12 angle views for e-commerce</div>
+      </div>
+      <div class="step-cost">~$0.80</div>
+      <button class="toggle off" id="tog-360" onclick="togStep('360',0.80)" aria-label="Toggle 360"></button>
+    </div>
+    <div class="step-row">
+      <div class="step-ico off" id="sico-social"><i class="ti ti-brand-instagram"></i></div>
+      <div class="step-info">
+        <div class="step-name">Social media crops <span class="badge b-gray" style="margin-left:5px;">Optional</span></div>
+        <div class="step-desc">Instagram, Story, LinkedIn banner — auto-sized</div>
+      </div>
+      <div class="step-cost">Free</div>
+      <button class="toggle off" id="tog-social" onclick="togStep('social',0)" aria-label="Toggle social crops"></button>
+    </div>
+  </div>
+
+  <div class="cost-bar">
+    <div class="ci">Steps on: <strong id="step-count">3</strong></div>
+    <div class="ci">Images: <strong id="img-count">~15</strong></div>
+    <div class="ci total" id="cost-total"><i class="ti ti-bolt"></i> Est. cost: <strong>~$0.95</strong></div>
+  </div>
+
+  <div class="sec">Step 5 — Review prompt</div>
+  <div class="card">
+    <div class="card-head">
+      <i class="ti ti-code"></i>
+      <div class="card-title">Auto-generated system prompt</div>
+      <span class="badge b-gray" id="prompt-ver">v2.3 · Automotive · India</span>
+    </div>
+    <div class="notice info" style="margin-bottom:10px;"><i class="ti ti-sparkles"></i> Built from your answers in Steps 1–3. Edit only if needed, or load from your prompt library.</div>
+    <div class="prompt-box" id="prompt-display">Generate a photorealistic <span class="ptag">[Mitsubishi ASX]</span> in <span class="ptag">[COLOR]</span> paint.
+Audience: <span class="ptag">general consumers · India market</span>.
+Use: <span class="ptag">product catalog</span>.
+View: front-right three-quarter. Drive: LHD.
+Plate: white, blank. Background: pure white. No overlap.</div>
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn sm outline" onclick="openPromptEditor()"><i class="ti ti-edit"></i> Edit / refine prompt</button>
+      <button class="btn sm" onclick="openLibrarySelect()"><i class="ti ti-library"></i> Load from library</button>
+      <button class="btn sm" onclick="savePromptToLibrary()"><i class="ti ti-device-floppy"></i> Save to library</button>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn primary" onclick="startGeneration()"><i class="ti ti-sparkles"></i> Confirm &amp; start generation</button>
+    <button class="btn" onclick="showToast('Saved as draft')"><i class="ti ti-device-floppy"></i> Save draft</button>
+  </div>
+</div>
+
+<!-- ════════════ GENERATE ════════════ -->
+<div class="screen" id="screen-generate">
+
+  <div class="sec">Step 1 — Color variants <span class="badge b-amber" id="gen-badge" style="vertical-align:middle;margin-left:6px;">Generating…</span></div>
+  <div class="card">
+    <div class="card-head">
+      <i class="ti ti-layout-grid"></i>
+      <div class="card-title">Generating <span id="gen-dims">4×3</span> grid — <span id="gen-model">Mitsubishi ASX</span></div>
+    </div>
+    <div class="progress-wrap"><div class="progress-fill" id="gen-bar" style="width:0%"></div></div>
+    <div style="font-size:11px;color:var(--tx3);margin-bottom:10px;" id="gen-status">Preparing…</div>
+    <div class="variant-grid-display" id="variant-grid" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="divider"></div>
+    <div class="btn-row" id="grid-approve-row" style="display:none;">
+      <button class="btn primary" onclick="approveGridAndContinue()"><i class="ti ti-circle-check"></i> All variants look good — continue</button>
+      <button class="btn sm outline" onclick="openFixModal(null,'all')"><i class="ti ti-refresh"></i> Regenerate all</button>
+    </div>
+  </div>
+
+  <div class="sec" id="life-gen-sec">Step 2 — Lifestyle scenes <span class="badge b-gray" id="life-gen-badge" style="vertical-align:middle;margin-left:6px;">Queued</span></div>
+  <div class="card dashed muted" id="life-gen-card">
+    <div class="card-head"><i class="ti ti-users"></i>
+      <div class="card-title">3 lifestyle scenes — <span id="gen-ctx">India · general consumers · catalog</span></div>
+    </div>
+    <div class="lifestyle-preview-strip" id="lifestyle-strip" style="display:none;">
+      <div class="lp-card" id="lp1"><i class="ti ti-loader spin" style="font-size:22px;color:var(--acc3);"></i><small>Generating…</small></div>
+      <div class="lp-card" id="lp2"><i class="ti ti-loader spin" style="font-size:22px;color:var(--acc3);"></i><small>Generating…</small></div>
+      <div class="lp-card" id="lp3"><i class="ti ti-loader spin" style="font-size:22px;color:var(--acc3);"></i><small>Generating…</small></div>
+    </div>
+    <div id="lifestyle-gen-note" style="display:none;font-size:11px;color:var(--tx3);margin-top:6px;">Generating lifestyle scenes using your target context…</div>
+    <div id="life-gen-waiting" style="font-size:11px;color:var(--tx3);">Starts automatically once Step 1 is approved.</div>
+    <div class="divider" id="life-gen-divider" style="display:none;"></div>
+    <div class="btn-row" id="life-gen-approve-row" style="display:none;">
+      <button class="btn primary" onclick="goTab('review')"><i class="ti ti-arrow-right"></i> Review all outputs</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ REVIEW ════════════ -->
+<div class="screen" id="screen-review">
+
+  <div class="sec">Step 1 review — Color variants <span class="badge b-green" id="rv-m1-badge" style="vertical-align:middle;margin-left:6px;">11/12 passed</span></div>
+  <div class="card">
+    <div class="card-head"><i class="ti ti-photo"></i>
+      <div class="card-title">Click a variant to select · hover to fix flagged ones</div>
+    </div>
+    <div class="review-grid" id="review-grid" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="approveAllVariants()"><i class="ti ti-circle-check"></i> Approve all</button>
+      <button class="btn outline" onclick="openFixModal('Silver')"><i class="ti ti-color-filter"></i> Fix Silver</button>
+      <button class="btn sm" onclick="showToast('Preview link copied')"><i class="ti ti-share"></i> Share preview</button>
+    </div>
+  </div>
+
+  <div class="sec">Step 2 review — Lifestyle images <span class="badge b-green" style="vertical-align:middle;margin-left:6px;">Ready</span></div>
+  <div class="card">
+    <div class="card-head"><i class="ti ti-users"></i>
+      <div class="card-title">Click each image to approve · approve all to proceed</div>
+    </div>
+    <div class="ls-grid">
+      <div class="ls-card" onclick="approveLS(this)"><i class="ti ti-photo"></i><small>Blue · rider · urban India</small></div>
+      <div class="ls-card" onclick="approveLS(this)"><i class="ti ti-photo"></i><small>Silver · standing · campus</small></div>
+      <div class="ls-card" onclick="approveLS(this)"><i class="ti ti-photo"></i><small>White · city · minimal</small></div>
+    </div>
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="approveAllLS()"><i class="ti ti-circle-check"></i> Approve all 3</button>
+      <button class="btn outline" onclick="regenLS()"><i class="ti ti-refresh"></i> Regen one</button>
+      <button class="btn sm"><i class="ti ti-plus"></i> Add scene</button>
+    </div>
+  </div>
+
+  <div class="notice ok" id="rv-ready" style="display:none;"><i class="ti ti-circle-check"></i> All steps approved — ready to deliver.</div>
+  <div id="rv-deliver-btn" style="display:none;margin-top:8px;">
+    <button class="btn primary" onclick="goDelivery()"><i class="ti ti-package-export"></i> Go to delivery</button>
+  </div>
+</div>
+
+<!-- ════════════ DELIVER ════════════ -->
+<div class="screen" id="screen-deliver">
+  <div class="sav-banner" style="margin-top:4px;">
+    <div class="sav-item"><div class="sav-lbl">THIS JOB</div><div class="sav-val">$0.91</div></div>
+    <div class="sav-item"><div class="sav-lbl">AGENCY PRICE</div><div class="sav-val">$285</div></div>
+    <div class="sav-item"><div class="sav-lbl">FREELANCER</div><div class="sav-val">$80</div></div>
+    <div class="sav-item"><div class="sav-lbl">YOU SAVED</div><div class="sav-val" style="font-size:28px;">99.7%</div></div>
+  </div>
+
+  <div class="sec">Cost comparison
+    <span class="info-btn" tabindex="0">i<span class="tooltip">12 color variants + 3 lifestyle images. Agency estimate: $19/image avg. Freelancer: $5.50/image avg. ChromaCraft: API cost only — DALL-E 3 ($0.62) + ControlNet ($0.29).</span></span>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="cost-tbl">
+      <thead><tr><th>Provider</th><th>Cost</th><th>Time</th><th>Revisions</th><th>Scalable</th></tr></thead>
+      <tbody>
+        <tr class="us"><td>⚡ ChromaCraft AI</td><td class="gn">$0.91</td><td class="gn">9 min</td><td class="gn">Unlimited</td><td class="gn">1,000+/day</td></tr>
+        <tr><td>Agency</td><td>$250–350</td><td>5–7 days</td><td>1–2 rounds</td><td>No</td></tr>
+        <tr><td>Freelancer</td><td>$60–100</td><td>2–4 days</td><td>1 round</td><td>Partial</td></tr>
+        <tr><td>DIY (Canva/PS)</td><td>8–16 hrs</td><td>1–2 days</td><td>Unlimited</td><td>No</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sec">QA results</div>
+  <div class="card">
+    <div class="qa-row ok"><i class="ti ti-circle-check"></i> 12/12 files · correct naming · Mitsubishi_ASX_[Color].png</div>
+    <div class="qa-row ok"><i class="ti ti-circle-check"></i> All thumbnails 800×600 px · identical dimensions</div>
+    <div class="qa-row ok"><i class="ti ti-circle-check"></i> Transparent background confirmed on all 12</div>
+    <div class="qa-row ok"><i class="ti ti-circle-check"></i> Lifestyle images — product proportions: passed</div>
+    <div class="qa-row" style="color:var(--warn);"><i class="ti ti-alert-circle"></i> Silver regenerated once — corrected and approved</div>
+    <div class="divider"></div>
+    <div style="font-size:12px;color:var(--suc);font-weight:500;">12/12 approved · ready to package</div>
+  </div>
+
+  <div class="sec">Delivery package</div>
+  <div class="card">
+    <div class="del-row"><div><div class="del-name">Mitsubishi_ASX_thumbnails.zip</div><div class="del-meta">12 PNG · transparent · 800×600 · 4.2 MB</div></div><span class="badge b-green">Step 1</span></div>
+    <div class="del-row"><div><div class="del-name">Mitsubishi_ASX_lifestyle.zip</div><div class="del-meta">3 JPEG · 4:3 · India · 8.7 MB</div></div><span class="badge b-gray">Step 2</span></div>
+    <div class="del-row"><div><div class="del-name">delivery_summary.pdf</div><div class="del-meta">QA log · prompt v2.3 · May 20 2026</div></div><span class="badge b-gray">All</span></div>
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="showToast('Downloading ZIP…')"><i class="ti ti-package-export"></i> Download ZIP</button>
+      <button class="btn outline" onclick="showToast('Pushed to Drive')"><i class="ti ti-brand-google-drive"></i> Push to Drive</button>
+      <button class="btn sm" onclick="showToast('Client link copied')"><i class="ti ti-share"></i> Share link</button>
+    </div>
+  </div>
+
+  <div class="sec">Generation log</div>
+  <div class="card">
+    <div class="gen-log">[Step 1] DALL-E 3 · prompt v2.3 · 12 calls · 1 retry (Silver) · $0.62
+[Step 1] Post-proc: rembg + PIL · split 4×3 → 12 thumbs · 1m 38s
+[Step 2] SD-XL + ControlNet · 3 calls · 0 retries · $0.29
+[Step 3–5] <span class="skip">Skipped — not enabled</span>
+<span class="ok">Total: $0.91 · 8m 52s · ~$284 saved vs agency</span></div>
+  </div>
+  <div class="notice ok"><i class="ti ti-circle-check"></i> Job complete. Prompt v2.3 saved to library.</div>
+</div>
+
+<!-- ════════════ HISTORY ════════════ -->
+<div class="screen" id="screen-history">
+
+  <!-- List view -->
+  <div id="hist-list">
+    <div class="g2">
+      <div>
+        <div class="sec">All jobs</div>
+        <div class="card">
+          <div class="job-row" onclick="openJobDetail('asx')"><div class="job-ico"><i class="ti ti-car"></i></div><div class="job-info"><div class="job-name">Mitsubishi ASX · 12 variants</div><div class="job-meta">Today · India · $0.91</div></div><span class="badge b-green">Done</span></div>
+          <div class="job-row" onclick="openJobDetail('rizta')"><div class="job-ico"><i class="ti ti-motorbike"></i></div><div class="job-info"><div class="job-name">Ather Rizta · lifestyle + video</div><div class="job-meta">May 18 · India · $1.42</div></div><span class="badge b-green">Done</span></div>
+          <div class="job-row" onclick="openJobDetail('sony')"><div class="job-ico"><i class="ti ti-device-laptop"></i></div><div class="job-info"><div class="job-name">Sony Bravia X90 · 8 variants</div><div class="job-meta">May 15 · MENA · $0.61</div></div><span class="badge b-green">Done</span></div>
+          <div class="job-row" onclick="openJobDetail('ikea')"><div class="job-ico"><i class="ti ti-armchair"></i></div><div class="job-info"><div class="job-name">Ikea Kallax · 6 variants</div><div class="job-meta">May 12 · Global · $0.48</div></div><span class="badge b-green">Done</span></div>
+          <div class="divider"></div>
+          <div style="font-size:11px;color:var(--tx3);">4 jobs · 33 images · <strong style="color:var(--suc);">~$650 saved</strong></div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Prompt library</div>
+        <div class="card">
+          <div class="job-row"><div class="job-ico" style="background:var(--acc-bg);"><i class="ti ti-car" style="color:var(--acc-tx);"></i></div><div class="job-info"><div class="job-name">Automotive · catalog · India</div><div class="job-meta">v2.3 · used 3×</div></div><button class="btn sm outline" onclick="openPromptLibraryEditor('Automotive · catalog · India')">Use</button></div>
+          <div class="job-row"><div class="job-ico" style="background:var(--acc-bg);"><i class="ti ti-motorbike" style="color:var(--acc-tx);"></i></div><div class="job-info"><div class="job-name">2-Wheeler · lifestyle · MENA</div><div class="job-meta">v1.4 · used 1×</div></div><button class="btn sm outline" onclick="openPromptLibraryEditor('2-Wheeler · lifestyle · MENA')">Use</button></div>
+          <div class="job-row"><div class="job-ico"><i class="ti ti-device-laptop"></i></div><div class="job-info"><div class="job-name">Electronics · dealer · MENA</div><div class="job-meta">v1.0 · used 1×</div></div><button class="btn sm outline" onclick="openPromptLibraryEditor('Electronics · dealer · MENA')">Use</button></div>
+          <div class="job-row" style="border-bottom:none;"><div class="job-ico" style="border-style:dashed;"><i class="ti ti-plus" style="color:var(--acc);"></i></div><div class="job-info"><div class="job-name" style="color:var(--acc);">New prompt template</div></div><button class="btn sm primary" onclick="openPromptLibraryEditor(null)">New</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Job detail view -->
+  <div id="hist-detail" style="display:none;">
+    <div class="jd-back" onclick="closeJobDetail()"><i class="ti ti-arrow-left"></i> All jobs</div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--bd);">
+        <div class="job-ico" id="jd-ico" style="width:40px;height:40px;border-radius:var(--r-lg);background:var(--acc-bg);"><i class="ti ti-car" id="jd-ico-i" style="font-size:18px;color:var(--acc-tx);"></i></div>
+        <div style="flex:1;"><div style="font-size:15px;font-weight:500;color:var(--tx);" id="jd-title">Mitsubishi ASX</div><div style="font-size:11px;color:var(--tx3);" id="jd-meta2">Today · India · $0.91</div></div>
+        <span class="badge b-green">Done</span>
+      </div>
+      <div class="g2" style="margin-bottom:12px;font-size:12px;">
+        <div><span style="color:var(--tx3);">Industry:</span> <strong id="jd-ind">Automotive</strong></div>
+        <div><span style="color:var(--tx3);">Market:</span> <strong id="jd-geo">India</strong></div>
+        <div><span style="color:var(--tx3);">Audience:</span> <strong id="jd-aud">General consumers</strong></div>
+        <div><span style="color:var(--tx3);">Purpose:</span> <strong id="jd-use">Product catalog</strong></div>
+        <div><span style="color:var(--tx3);">Grid:</span> <strong id="jd-grid">4×3 · 12 colors</strong></div>
+        <div><span style="color:var(--tx3);">Cost:</span> <strong id="jd-cost">$0.91</strong></div>
+      </div>
+      <div class="sec" style="margin-top:0;">Step 1 — Color variants</div>
+      <div class="jd-grid" id="jd-thumbs" style="grid-template-columns:repeat(4,1fr);"></div>
+      <div class="sec" style="margin-top:12px;">Step 2 — Lifestyle images</div>
+      <div class="ls-grid" id="jd-lifestyle">
+        <div class="ls-card approved"><i class="ti ti-photo"></i><small>Blue · rider · India</small></div>
+        <div class="ls-card approved"><i class="ti ti-photo"></i><small>Silver · standing</small></div>
+        <div class="ls-card approved"><i class="ti ti-photo"></i><small>White · city</small></div>
+      </div>
+      <div class="sec" style="margin-top:12px;">Deliverables</div>
+      <div class="del-row" id="jd-del1"><div><div class="del-name" id="jd-d1n">Mitsubishi_ASX_thumbnails.zip</div><div class="del-meta" id="jd-d1m">12 PNG · 4.2 MB</div></div><button class="btn sm outline" onclick="showToast('Downloading…')"><i class="ti ti-download"></i> Download</button></div>
+      <div class="del-row"><div><div class="del-name" id="jd-d2n">Mitsubishi_ASX_lifestyle.zip</div><div class="del-meta" id="jd-d2m">3 JPEG · 8.7 MB</div></div><button class="btn sm outline" onclick="showToast('Downloading…')"><i class="ti ti-download"></i> Download</button></div>
+      <div class="del-row"><div><div class="del-name">delivery_summary.pdf</div><div class="del-meta">QA log · generation details</div></div><button class="btn sm outline" onclick="showToast('Downloading…')"><i class="ti ti-download"></i> Download</button></div>
+      <div class="divider"></div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="rerunJobFromDetail()"><i class="ti ti-repeat"></i> Re-run this job</button>
+        <button class="btn sm" onclick="showToast('Link copied')"><i class="ti ti-share"></i> Share</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ PROFILE ════════════ -->
+<div class="screen" id="screen-profile">
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+      <div class="profile-avatar">AG</div>
+      <div style="flex:1;">
+        <div style="font-family:'Playfair Display',Georgia,serif;font-size:18px;font-weight:500;color:var(--tx);">Anirban G</div>
+        <div style="font-size:12px;color:var(--tx3);margin-top:2px;">anirban@life180labs.com · Life180 Labs</div>
+        <div style="margin-top:8px;"><span class="badge b-gray">Free plan</span></div>
+      </div>
+      <button class="btn sm" onclick="showToast('Edit profile saved')"><i class="ti ti-edit"></i> Edit</button>
+    </div>
+  </div>
+
+  <div class="sec">Account settings</div>
+  <div class="card">
+    <div class="settings-row">
+      <div><div class="settings-label">Email address</div><div class="settings-desc">anirban@life180labs.com</div></div>
+      <button class="btn sm" onclick="showToast('Verification email sent')">Change</button>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Password</div><div class="settings-desc">Last changed 30 days ago</div></div>
+      <button class="btn sm" onclick="showToast('Password reset email sent')">Reset</button>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Two-factor authentication</div><div class="settings-desc">Adds an extra layer of security</div></div>
+      <button class="toggle off" onclick="this.classList.toggle('on');this.classList.toggle('off');showToast('2FA setting updated')" aria-label="Toggle 2FA"></button>
+    </div>
+  </div>
+
+  <div class="sec">Preferences</div>
+  <div class="card">
+    <div class="settings-row">
+      <div><div class="settings-label">Dark / night mode</div><div class="settings-desc">Switch to dark theme</div></div>
+      <button class="toggle off" id="profile-night-tog" onclick="toggleNightFromProfile()" aria-label="Toggle night mode"></button>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Email notifications</div><div class="settings-desc">Job complete, QA alerts</div></div>
+      <button class="toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off');showToast('Notifications updated')" aria-label="Toggle notifications"></button>
+    </div>
+  </div>
+
+
+
+  <div class="divider"></div>
+  <button class="btn danger-outline" onclick="doLogout()"><i class="ti ti-logout"></i> Sign out</button>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-left"><strong>ChromaCraft AI</strong> &nbsp;·&nbsp; &copy; 2026 Life180 Labs · All rights reserved</div>
+  <div class="footer-right"><a class="footer-link" href="#">Privacy</a><a class="footer-link" href="#">Terms</a><a class="footer-link" href="#">life180labs.com</a></div>
+</div>
+
+</main>
+</div><!-- end page-app -->
+
+<!-- ══ MODALS ══ -->
+
+<!-- Upload modal -->
+<div class="overlay" id="upload-modal" onclick="closeOverlay(event,'upload-modal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('upload-modal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title">Add product image</div>
+    <div class="modal-sub">Upload from device, paste a URL, or import from cloud storage</div>
+    <div class="upload-tabs">
+      <button class="upload-tab-btn active" onclick="switchUpTab('device',this)"><i class="ti ti-upload"></i> Device</button>
+      <button class="upload-tab-btn" onclick="switchUpTab('url',this)"><i class="ti ti-link"></i> URL</button>
+      <button class="upload-tab-btn" onclick="switchUpTab('cloud',this)"><i class="ti ti-cloud"></i> Cloud</button>
+    </div>
+    <div class="upload-panel active" id="upanel-device">
+      <div class="drop-zone" onclick="document.getElementById('file-inp').click()">
+        <i class="ti ti-photo-up"></i><p>Click to browse or drag &amp; drop</p><small>PNG · JPG · WEBP · min 800×600 · max 20 MB</small>
+      </div>
+      <input type="file" id="file-inp" class="hidden-file" accept="image/*" onchange="handleFile(this)">
+    </div>
+    <div class="upload-panel" id="upanel-url">
+      <div style="font-size:12px;color:var(--tx3);margin-bottom:9px;">Paste a direct image URL or product page — agent extracts the main product photo automatically.</div>
+      <div class="url-row"><input type="text" id="url-inp" placeholder="https://example.com/product.png or product page URL"><button class="btn primary sm" onclick="confirmURL()"><i class="ti ti-arrow-right"></i> Use</button></div>
+    </div>
+    <div class="upload-panel" id="upanel-cloud">
+      <div class="cloud-grid">
+        <div class="cloud-opt" onclick="cloudImport('Google Drive')"><i class="ti ti-brand-google-drive" style="color:#4285F4;"></i><span>Google Drive</span></div>
+        <div class="cloud-opt" onclick="cloudImport('Dropbox')"><i class="ti ti-droplet" style="color:#0061FF;"></i><span>Dropbox</span></div>
+      </div>
+      <div class="url-row" style="margin-top:10px;"><input type="text" id="cloud-inp" placeholder="Paste Drive / Dropbox shared link…"><button class="btn primary sm" onclick="cloudImport('link')"><i class="ti ti-arrow-right"></i> Import</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Prompt editor modal -->
+<div class="overlay" id="prompt-modal" onclick="closeOverlay(event,'prompt-modal')">
+  <div class="modal prompt-modal">
+    <button class="modal-close" onclick="closeModal('prompt-modal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title" id="pm-title">Prompt editor</div>
+    <div class="modal-sub">Edit the generated prompt or use guided suggestions to improve it for your use case</div>
+
+    <div style="font-size:11px;font-weight:500;color:var(--tx2);margin-bottom:6px;">Guided improvements — click to apply</div>
+    <div class="guided-chips" id="guided-chips">
+      <div class="guided-chip" onclick="applyGuide(this,'Add studio lighting')">+ Studio lighting</div>
+      <div class="guided-chip" onclick="applyGuide(this,'Add soft shadows')">+ Soft shadows</div>
+      <div class="guided-chip" onclick="applyGuide(this,'Enhance metallic finish')">+ Metallic finish</div>
+      <div class="guided-chip" onclick="applyGuide(this,'Add Indian street background')">+ Indian street BG</div>
+      <div class="guided-chip" onclick="applyGuide(this,'Cinematic color grade')">+ Cinematic grade</div>
+      <div class="guided-chip" onclick="applyGuide(this,'Remove all shadows')">− Remove shadows</div>
+      <div class="guided-chip" onclick="applyGuide(this,'Pure white studio background')">+ Pure white studio</div>
+      <div class="guided-chip" onclick="applyGuide(this,'High resolution 4K detail')">+ 4K detail</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:500;color:var(--tx2);margin-bottom:6px;margin-top:4px;">Active prompt</div>
+    <textarea class="prompt-editor-area" id="prompt-textarea"></textarea>
+
+    <div style="font-size:11px;color:var(--tx3);margin:8px 0 4px;">Applied enhancements</div>
+    <div class="suggestion-pills" id="sug-pills"></div>
+
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="savePromptFromEditor()"><i class="ti ti-check"></i> Use this prompt</button>
+      <button class="btn sm" onclick="savePromptToLib()"><i class="ti ti-device-floppy"></i> Save to library</button>
+      <button class="btn sm ghost" onclick="resetPrompt()"><i class="ti ti-refresh"></i> Reset to auto</button>
+    </div>
+  </div>
+</div>
+
+<!-- Library select modal (Step 5 load from library) -->
+<div class="overlay" id="lib-modal" onclick="closeOverlay(event,'lib-modal')">
+  <div class="modal" style="width:460px;">
+    <button class="modal-close" onclick="closeModal('lib-modal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title">Load from prompt library</div>
+    <div class="modal-sub">Select a saved prompt to load into Step 5</div>
+    <div class="lib-select-list">
+      <div class="lib-select-item sel" onclick="selLibItem(this,'Automotive · catalog · India','v2.3')">
+        <div><div class="lib-item-name">Automotive · catalog · India</div><div class="lib-item-meta">v2.3 · used 3× · last: today</div></div>
+      </div>
+      <div class="lib-select-item" onclick="selLibItem(this,'2-Wheeler · lifestyle · MENA','v1.4')">
+        <div><div class="lib-item-name">2-Wheeler · lifestyle · MENA</div><div class="lib-item-meta">v1.4 · used 1× · last: May 18</div></div>
+      </div>
+      <div class="lib-select-item" onclick="selLibItem(this,'Electronics · dealer · MENA','v1.0')">
+        <div><div class="lib-item-name">Electronics · dealer · MENA</div><div class="lib-item-meta">v1.0 · used 1× · last: May 15</div></div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn primary" id="lib-load-btn" onclick="loadLibPrompt()"><i class="ti ti-download"></i> Load selected prompt</button>
+      <button class="btn ghost sm" onclick="closeModal('lib-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Prompt library editor modal (from Jobs > Use) -->
+<div class="overlay" id="plib-modal" onclick="closeOverlay(event,'plib-modal')">
+  <div class="modal prompt-modal">
+    <button class="modal-close" onclick="closeModal('plib-modal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title" id="plib-title">Prompt editor — Automotive · catalog · India</div>
+    <div class="modal-sub">Edit this prompt, add guided improvements, then use it in a new job</div>
+
+    <div style="font-size:11px;font-weight:500;color:var(--tx2);margin-bottom:6px;">Guided improvements</div>
+    <div class="guided-chips">
+      <div class="guided-chip" onclick="applyGuideLib(this,'Add studio lighting')">+ Studio lighting</div>
+      <div class="guided-chip" onclick="applyGuideLib(this,'Add soft shadows')">+ Soft shadows</div>
+      <div class="guided-chip" onclick="applyGuideLib(this,'Enhance metallic finish')">+ Metallic finish</div>
+      <div class="guided-chip" onclick="applyGuideLib(this,'Cinematic color grade')">+ Cinematic grade</div>
+      <div class="guided-chip" onclick="applyGuideLib(this,'Pure white studio background')">+ White studio</div>
+      <div class="guided-chip" onclick="applyGuideLib(this,'High resolution 4K detail')">+ 4K detail</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:500;color:var(--tx2);margin:8px 0 5px;">Prompt</div>
+    <textarea class="prompt-editor-area" id="plib-textarea" style="min-height:140px;"></textarea>
+
+    <div style="font-size:11px;color:var(--tx3);margin:8px 0 4px;">Applied enhancements</div>
+    <div class="suggestion-pills" id="plib-pills"></div>
+
+    <div class="divider"></div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="useLibPromptInJob()"><i class="ti ti-sparkles"></i> Use in new job</button>
+      <button class="btn sm" onclick="savePlibPrompt()"><i class="ti ti-device-floppy"></i> Save changes</button>
+      <button class="btn sm ghost" onclick="closeModal('plib-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fix color modal -->
+<div class="overlay" id="fix-modal" onclick="closeOverlay(event,'fix-modal')">
+  <div class="modal" style="max-width:400px;">
+    <button class="modal-close" onclick="closeModal('fix-modal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title" style="color:var(--err);">Fix color — <span id="fix-name">Silver</span></div>
+    <div class="modal-sub">Tell the AI what was wrong so it regenerates correctly</div>
+    <div class="fix-modal-body">
+      <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:7px;">What was the issue?</div>
+      <div class="fix-opts">
+        <div class="fix-opt sel" onclick="this.classList.toggle('sel')">Too dark</div>
+        <div class="fix-opt" onclick="this.classList.toggle('sel')">Too light</div>
+        <div class="fix-opt" onclick="this.classList.toggle('sel')">Wrong hue</div>
+        <div class="fix-opt" onclick="this.classList.toggle('sel')">Metallic sheen off</div>
+        <div class="fix-opt" onclick="this.classList.toggle('sel')">Looks grainy</div>
+        <div class="fix-opt" onclick="this.classList.toggle('sel')">Inconsistent</div>
+      </div>
+      <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:5px;margin-top:4px;">Describe target shade <span style="color:var(--tx3);font-weight:400;">(optional)</span></div>
+      <input type="text" id="fix-desc" style="width:100%;padding:8px 11px;font-size:12px;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--tx);outline:none;margin-bottom:10px;" placeholder="e.g. 'Bright chrome metallic, not matte grey'">
+      <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:6px;">Reference shade</div>
+      <div class="shade-row-fix" id="fix-shade-row"></div>
+    </div>
+    <div class="divider"></div>
+    <button class="btn primary" style="width:100%;justify-content:center;" onclick="applyColorFix()"><i class="ti ti-sparkles"></i> Regenerate with fix</button>
+  </div>
+</div>
+
+<!-- Cell color picker modal -->
+<div class="overlay" id="cell-color-modal" onclick="closeOverlay(event,'cell-color-modal')">
+  <div class="modal" style="max-width:320px;">
+    <button class="modal-close" onclick="closeModal('cell-color-modal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title">Change color — <span id="ccp-cell-name">White</span></div>
+    <div class="modal-sub">Pick a different shade or enter a custom hex</div>
+    <div style="font-size:11px;font-weight:500;color:var(--tx2);margin-bottom:7px;">Color family</div>
+    <div class="ccp-swatches" id="ccp-main-swatches" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;"></div>
+    <div style="font-size:11px;font-weight:500;color:var(--tx2);margin-bottom:7px;">Shades</div>
+    <div class="shade-sub" id="ccp-shade-swatches"></div>
+    <div style="margin-top:8px;">
+      <label style="font-size:11px;color:var(--tx3);display:block;margin-bottom:4px;">Custom hex / color picker</label>
+      <input type="color" id="ccp-custom-color" style="width:100%;height:36px;border:1px solid var(--bd);border-radius:var(--r);cursor:pointer;background:var(--bg2);padding:3px;" onchange="applyCellCustomColor(this.value)">
+    </div>
+    <div class="divider"></div>
+    <button class="btn primary sm" style="width:100%;justify-content:center;" onclick="confirmCellColor()"><i class="ti ti-check"></i> Apply color</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"><i class="ti ti-circle-check"></i><span id="toast-msg"></span></div>
+<script>
+// ══ DATA ══
+var COLORS=[
+  {n:'White',h:'#ffffff'},{n:'Black',h:'#1a1a1a'},{n:'Blue',h:'#2563eb'},
+  {n:'Red',h:'#dc2626'},{n:'Green',h:'#16a34a'},{n:'Brown',h:'#92400e'},
+  {n:'Silver',h:'#9ca3af'},{n:'Yellow',h:'#eab308'},{n:'Cream',h:'#fef9c3'},
+  {n:'Pink',h:'#ec4899'},{n:'D.Blue',h:'#1e3a5f'},{n:'Orange',h:'#ea580c'}
+];
+var SHADES={
+  White:['#ffffff','#f5f5f5','#e8e8e8','#fefefe','#fffff0'],
+  Black:['#1a1a1a','#000000','#2d2d2d','#111111','#333333'],
+  Blue:['#2563eb','#1d4ed8','#3b82f6','#1e40af','#60a5fa'],
+  Red:['#dc2626','#b91c1c','#ef4444','#991b1b','#f87171'],
+  Green:['#16a34a','#15803d','#22c55e','#166534','#4ade80'],
+  Brown:['#92400e','#78350f','#b45309','#451a03','#d97706'],
+  Silver:['#C0C0C0','#A9A9A9','#D3D3D3','#BFC1C2','#E8E8E8','#9E9E9E'],
+  Yellow:['#eab308','#ca8a04','#facc15','#a16207','#fde047'],
+  Cream:['#fef9c3','#fef08a','#fefce8','#fffbeb','#fdf9e3'],
+  Pink:['#ec4899','#db2777','#f472b6','#be185d','#fbcfe8'],
+  'D.Blue':['#1e3a5f','#1e3a8a','#1d4ed8','#0f172a','#1e40af'],
+  Orange:['#ea580c','#c2410c','#f97316','#9a3412','#fb923c']
+};
+var JOBS={
+  asx:{ico:'ti-car',t:'Mitsubishi ASX · 12 variants',m:'Today · India · $0.91 · 12 files',
+    ind:'Automotive',geo:'India',aud:'General consumers',use:'Product catalog',
+    grid:'4×3 · 12 colors',cost:'$0.91',cols:4,rows:3,
+    d1n:'Mitsubishi_ASX_thumbnails.zip',d1m:'12 PNG · transparent · 4.2 MB',
+    d2n:'Mitsubishi_ASX_lifestyle.zip',d2m:'3 JPEG · India · 8.7 MB'},
+  rizta:{ico:'ti-motorbike',t:'Ather Rizta · lifestyle + video',m:'May 18 · India · $1.42 · 4 outputs',
+    ind:'2-Wheeler',geo:'India',aud:'Young urban buyers',use:'Social media',
+    grid:'3×2 · 6 colors',cost:'$1.42',cols:3,rows:2,
+    d1n:'Ather_Rizta_variants.zip',d1m:'6 PNG · transparent · 2.1 MB',
+    d2n:'Ather_Rizta_lifestyle.zip',d2m:'3 JPEG + 1 MP4 · 22 MB'},
+  sony:{ico:'ti-device-laptop',t:'Sony Bravia X90 · 8 variants',m:'May 15 · MENA · $0.61 · 8 files',
+    ind:'Electronics',geo:'MENA',aud:'B2B fleet',use:'Dealer / sales',
+    grid:'4×2 · 8 colors',cost:'$0.61',cols:4,rows:2,
+    d1n:'Sony_BraviaX90_thumbnails.zip',d1m:'8 PNG · transparent · 3.2 MB',
+    d2n:'Sony_BraviaX90_lifestyle.zip',d2m:'2 JPEG · MENA · 4.1 MB'},
+  ikea:{ico:'ti-armchair',t:'Ikea Kallax · 6 variants',m:'May 12 · Global · $0.48 · 6 files',
+    ind:'Furniture',geo:'Global',aud:'Families',use:'E-commerce',
+    grid:'3×2 · 6 colors',cost:'$0.48',cols:3,rows:2,
+    d1n:'Ikea_Kallax_thumbnails.zip',d1m:'6 PNG · transparent · 2.8 MB',
+    d2n:'Ikea_Kallax_lifestyle.zip',d2m:'3 JPEG · neutral · 5.4 MB'}
+};
+var PROMPT_TEMPLATES={
+  'Automotive · catalog · India':'Generate a photorealistic [MODEL] in [COLOR] paint.\nAudience: general consumers · India market.\nUse: product catalog / e-commerce.\nView: front-right three-quarter. Drive: LHD, steering wheel visible left.\nPlate: white, blank. Background: pure white. No overlap. Uniform scale.',
+  '2-Wheeler · lifestyle · MENA':'Generate a lifestyle photo of a [MODEL] in [COLOR] with a rider in urban MENA setting.\nAudience: young urban buyers. Use: social media campaign.\nPreserve product proportions via ControlNet. Vibrant, high-contrast style.',
+  'Electronics · dealer · MENA':'Generate a clean product shot of a [MODEL] in [COLOR] colorway.\nBackground: neutral studio. Audience: B2B dealers · MENA.\nLighting: professional studio, soft shadows. Resolution: 4K crisp.'
+};
+var ST={
+  industry:'Automotive',uploaded:false,night:false,
+  gridCols:4,gridRows:3,
+  mods:{life:true,video:false,'360':false,social:false},
+  modCosts:{life:.30,video:.50,'360':.80,social:0},
+  baseCost:.65,
+  m1ok:false,m2ok:false,
+  cellColors:{},
+  activeCell:null,
+  selLibPrompt:'Automotive · catalog · India',
+  selLibVer:'v2.3',
+  promptText:'',
+  appliedGuides:[],
+  genInt:null
+};
+
+// ══ PAGE ROUTING ══
+function showPage(id){
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  document.getElementById('page-'+id).classList.add('active');
+}
+function doLogin(){
+  var e=document.getElementById('login-email');
+  if(e&&!e.value){showToast('Please enter your email');return;}
+  showPage('app');
+  goTab('home');
+  // Reset stepper wrap - home has no stepper
+  document.getElementById('stepper-wrap').style.display='none';
+  showToast('Welcome back, Anirban!');
+}
+function doLogout(){showPage('cover');}
+function socialLogin(p){showToast('Connecting via '+p+'…');setTimeout(function(){showPage('app');goTab('home');showToast('Signed in via '+p);},800);}
+function togglePw(id,btn){
+  var i=document.getElementById(id);
+  if(i.type==='password'){i.type='text';btn.innerHTML='<i class="ti ti-eye-off"></i>';}
+  else{i.type='password';btn.innerHTML='<i class="ti ti-eye"></i>';}
+}
+function switchAuthTab(id,el){
+  document.querySelectorAll('.auth-tab').forEach(function(t){t.classList.remove('active')});
+  el.classList.add('active');
+  document.querySelectorAll('.auth-panel').forEach(function(p){p.classList.remove('active')});
+  document.getElementById('auth-'+id).classList.add('active');
+}
+
+// ══ TAB NAV ══
+var STEPPERS={
+  setup:{steps:['Configure','Prompt','Generate'],active:0},
+  generate:{steps:['Generating variants','Lifestyle scenes','Done'],active:0},
+  review:{steps:['Variants','Lifestyle','Approved'],active:0},
+  deliver:{steps:['QA passed','Packaged','Ready'],active:2}
+};
+function goTab(id){
+  document.querySelectorAll('#page-app .screen').forEach(function(s){s.classList.remove('active')});
+  document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});
+  var s=document.getElementById('screen-'+id);
+  if(s)s.classList.add('active');
+  var t=document.getElementById('tab-'+id);
+  if(t)t.classList.add('active');
+  // Update mobile nav active state too
+  document.querySelectorAll('.mobile-nav .nav-tab').forEach(function(t){t.classList.remove('active')});
+  // Reset history detail if navigating away
+  if(id!=='history'){
+    var hd=document.getElementById('hist-detail');
+    var hl=document.getElementById('hist-list');
+    if(hd&&hl){hd.style.display='none';hl.style.display='block';}
+  }
+  updateStepper(id);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function updateStepper(id){
+  var wrap=document.getElementById('stepper-wrap');
+  var noStepper=['home','history','profile','deliver'];
+  if(!wrap)return;
+  var st=STEPPERS[id];
+  if(!st||noStepper.indexOf(id)!==-1){wrap.style.display='none';return;}
+  wrap.style.display='block';
+  var el=document.getElementById('stepper');
+  el.innerHTML='';
+  st.steps.forEach(function(lbl,i){
+    var item=document.createElement('div');
+    item.className='step-item'+(i<st.active?' done':i===st.active?' active':'');
+    item.innerHTML='<div class="step-dot">'+(i<st.active?'<i class="ti ti-check" style="font-size:9px;"></i>':(i+1))+'</div><div class="step-lbl">'+lbl+'</div>';
+    el.appendChild(item);
+  });
+}
+
+// ══ MOBILE ══
+function toggleMobileNav(){document.getElementById('mobile-nav').classList.toggle('open')}
+function closeMobileNav(){document.getElementById('mobile-nav').classList.remove('open')}
+
+// ══ UPLOAD ══
+function openUploadModal(){openModal('upload-modal')}
+function handleFile(inp){
+  if(!inp.files||!inp.files[0])return;
+  var f=inp.files[0];
+  setUploaded('Uploaded: '+f.name+' ('+Math.round(f.size/1024)+' KB)');
+}
+function confirmURL(){
+  var v=document.getElementById('url-inp').value.trim();
+  if(!v){showToast('Enter a URL');return;}
+  setUploaded('URL accepted: '+v.substring(0,40)+(v.length>40?'…':''));
+}
+function cloudImport(src){setUploaded('Imported from '+src);}
+function setUploaded(msg){
+  closeModal('upload-modal');
+  ST.uploaded=true;
+  var z=document.getElementById('uzone');
+  z.classList.add('done');
+  document.getElementById('uzone-icon').className='ti ti-circle-check';
+  document.getElementById('uzone-text').textContent=msg;
+  document.getElementById('uzone-sub').textContent='Ready to generate';
+  showToast('Image confirmed');
+}
+function switchUpTab(id,el){
+  document.querySelectorAll('.upload-tab-btn').forEach(function(t){t.classList.remove('active')});
+  el.classList.add('active');
+  document.querySelectorAll('.upload-panel').forEach(function(p){p.classList.remove('active')});
+  document.getElementById('upanel-'+id).classList.add('active');
+}
+
+// ══ INDUSTRY / OPTIONS ══
+function selInd(el,name){
+  document.querySelectorAll('.ind-card').forEach(function(c){c.classList.remove('sel')});
+  el.classList.add('sel');ST.industry=name;
+  updatePromptDisplay();showToast(name+' defaults loaded');
+  STEPPERS.setup.active=0;updateStepper('setup');
+}
+function selOpt(el,p){
+  p.querySelectorAll('.sq-opt').forEach(function(o){o.classList.remove('sel')});
+  el.classList.add('sel');updatePromptDisplay();
+}
+
+// ══ GRID ══
+function adjGrid(dim,d){
+  if(dim==='c')ST.gridCols=Math.max(1,Math.min(6,ST.gridCols+d));
+  else ST.gridRows=Math.max(1,Math.min(6,ST.gridRows+d));
+  document.getElementById('cv').textContent=ST.gridCols;
+  document.getElementById('rv').textContent=ST.gridRows;
+  var tot=ST.gridCols*ST.gridRows;
+  document.getElementById('grid-total-lbl').textContent=tot+' images';
+  document.getElementById('img-count').textContent='~'+(tot+3);
+  document.getElementById('grid-desc').textContent=ST.gridCols+' cols × '+ST.gridRows+' rows = '+tot+' variants';
+  var m=document.getElementById('grid-mini');
+  m.style.gridTemplateColumns='repeat('+ST.gridCols+',11px)';
+  m.innerHTML='';
+  for(var i=0;i<tot;i++){var c=document.createElement('div');c.className='grid-mini-cell';m.appendChild(c);}
+  updateCostBar();
+}
+
+// ══ STEP TOGGLES ══
+function togStep(id,cost){
+  var btn=document.getElementById('tog-'+id);
+  var ico=document.getElementById('sico-'+id);
+  var on=btn.classList.contains('on');
+  btn.classList.toggle('on',!on);btn.classList.toggle('off',on);
+  ico.classList.toggle('on',!on);ico.classList.toggle('off',on);
+  ST.mods[id]=!on;updateCostBar();
+}
+function updateCostBar(){
+  var extra=0,cnt=2;
+  Object.keys(ST.mods).forEach(function(k){if(ST.mods[k]){extra+=ST.modCosts[k];cnt++;}});
+  document.getElementById('step-count').textContent=cnt;
+  document.getElementById('cost-total').innerHTML='<i class="ti ti-bolt"></i> Est. cost: <strong>~$'+(ST.baseCost+extra).toFixed(2)+'</strong>';
+}
+
+// ══ PROMPT ══
+function onModelInput(el){
+  document.getElementById('file-prefix').value=el.value.replace(/\s+/g,'_');
+  updatePromptDisplay();
+}
+function updatePromptDisplay(){
+  var model=document.getElementById('model-name').value||'Mitsubishi ASX';
+  var audEl=document.querySelector('#screen-setup .sq:nth-of-type(1) .sq-opt.sel');
+  var geoEl=document.querySelector('#screen-setup .sq:nth-of-type(2) .sq-opt.sel');
+  var useEl=document.querySelector('#screen-setup .sq:nth-of-type(3) .sq-opt.sel');
+  var aud=audEl?audEl.textContent:'general consumers';
+  var geo=geoEl?geoEl.textContent:'India';
+  var use=useEl?useEl.textContent:'product catalog';
+  ST.promptText='Generate a photorealistic ['+model+'] in [COLOR] paint.\nAudience: '+aud.toLowerCase()+' · '+geo.toLowerCase()+' market.\nUse: '+use.toLowerCase()+'.\nView: front-right three-quarter. Drive: LHD.\nPlate: white, blank. Background: pure white. No overlap.';
+  document.getElementById('gen-model').textContent=model;
+  document.getElementById('gen-dims').textContent=ST.gridCols+'×'+ST.gridRows;
+  document.getElementById('gen-ctx').textContent=geo.split(' ')[0]+' · '+aud.toLowerCase()+' · catalog';
+  document.getElementById('prompt-ver').textContent='v2.3 · '+ST.industry+' · '+geo.split(' ')[0];
+  var pd=document.getElementById('prompt-display');
+  pd.innerHTML='Generate a photorealistic <span class="ptag">['+model+']</span> in <span class="ptag">[COLOR]</span> paint.\nAudience: <span class="ptag">'+aud.toLowerCase()+' · '+geo.toLowerCase()+' market</span>.\nUse: <span class="ptag">'+use.toLowerCase()+'</span>.\nView: front-right three-quarter. Drive: LHD.\nPlate: white, blank. Background: pure white. No overlap.';
+}
+function openPromptEditor(){
+  updatePromptDisplay();
+  document.getElementById('prompt-textarea').value=ST.promptText;
+  ST.appliedGuides=[];
+  document.getElementById('sug-pills').innerHTML='';
+  document.getElementById('guided-chips').querySelectorAll('.guided-chip').forEach(function(c){c.classList.remove('sel')});
+  openModal('prompt-modal');
+}
+function applyGuide(el,txt){
+  el.classList.toggle('sel');
+  if(el.classList.contains('sel')){
+    ST.appliedGuides.push(txt);
+    var ta=document.getElementById('prompt-textarea');
+    ta.value=ta.value+'\n// '+txt;
+    var pill=document.createElement('div');pill.className='sug-pill';pill.textContent=txt;
+    pill.onclick=function(){el.classList.remove('sel');this.remove();ta.value=ta.value.replace('\n// '+txt,'');};
+    document.getElementById('sug-pills').appendChild(pill);
+  }
+}
+function savePromptFromEditor(){
+  var val=document.getElementById('prompt-textarea').value;
+  ST.promptText=val;
+  var pd=document.getElementById('prompt-display');
+  pd.textContent=val;
+  closeModal('prompt-modal');
+  showToast('Prompt updated');
+  STEPPERS.setup.active=4;updateStepper('setup');
+}
+function savePromptToLib(){showToast('Prompt saved to library');closeModal('prompt-modal');}
+function savePromptToLibrary(){showToast('Saved to prompt library');STEPPERS.setup.active=4;updateStepper('setup');}
+function resetPrompt(){updatePromptDisplay();document.getElementById('prompt-textarea').value=ST.promptText;document.getElementById('sug-pills').innerHTML='';document.querySelectorAll('#prompt-modal .guided-chip').forEach(function(c){c.classList.remove('sel')});}
+function openLibrarySelect(){openModal('lib-modal');}
+function selLibItem(el,name,ver){
+  document.querySelectorAll('.lib-select-item').forEach(function(i){i.classList.remove('sel')});
+  el.classList.add('sel');ST.selLibPrompt=name;ST.selLibVer=ver;
+}
+function loadLibPrompt(){
+  var txt=PROMPT_TEMPLATES[ST.selLibPrompt]||ST.promptText;
+  ST.promptText=txt;
+  var pd=document.getElementById('prompt-display');
+  pd.textContent=txt;
+  document.getElementById('prompt-ver').textContent=ST.selLibVer+' · '+ST.selLibPrompt.split(' ')[0];
+  closeModal('lib-modal');
+  showToast('Prompt loaded: '+ST.selLibPrompt);
+}
+
+// ══ GENERATION ══
+function startGeneration(){
+  if(!ST.uploaded){openUploadModal();return;}
+  buildVariantGrid();
+  STEPPERS.setup.active=2;
+  goTab('generate');
+  STEPPERS.generate.active=0;updateStepper('generate');
+  runGeneration();
+}
+function coloredCarSVG(color,state){
+  var bodyC=color;
+  var glassC='rgba(180,220,255,0.7)';
+  var wheelC='#333';
+  var bumperC=state==='pending'?'#ccc':'#888';
+  return '<svg width="60" height="36" viewBox="0 0 52 32" fill="none" xmlns="http://www.w3.org/2000/svg">'+
+    '<rect x="8" y="16" width="36" height="12" rx="3" fill="'+bodyC+'"/>'+
+    '<path d="M14 16 L17 8 L35 8 L38 16Z" fill="'+bodyC+'"/>'+
+    '<rect x="18" y="9" width="7" height="6" rx="1" fill="'+glassC+'"/>'+
+    '<rect x="27" y="9" width="7" height="6" rx="1" fill="'+glassC+'"/>'+
+    '<circle cx="16" cy="28" r="4" fill="'+wheelC+'"/><circle cx="16" cy="28" r="2" fill="#666"/>'+
+    '<circle cx="36" cy="28" r="4" fill="'+wheelC+'"/><circle cx="36" cy="28" r="2" fill="#666"/>'+
+    '<rect x="8" y="20" width="3" height="2" rx="1" fill="#FFD700"/>'+
+    '<rect x="41" y="20" width="3" height="2" rx="1" fill="#FF4444"/>'+
+    '<rect x="18" y="26" width="8" height="2" rx="1" fill="rgba(255,255,255,0.4)"/>'+
+  '</svg>';
+}
+function buildVariantGrid(){
+  var tot=ST.gridCols*ST.gridRows;
+  var cnt=Math.min(tot,COLORS.length);
+  var grid=document.getElementById('variant-grid');
+  var dispCols=Math.min(ST.gridCols,4);
+  grid.style.gridTemplateColumns='repeat('+dispCols+',1fr)';
+  grid.innerHTML='';
+  for(var i=0;i<cnt;i++){
+    var c=COLORS[i];
+    var hex=ST.cellColors[i]||c.h;
+    var cell=document.createElement('div');
+    cell.className='variant-cell pending';
+    cell.dataset.idx=i;cell.dataset.name=c.n;cell.dataset.hex=hex;
+    cell.innerHTML=
+      '<div class="vc-swatch" style="background:'+hex+';"></div>'+
+      '<div class="vc-body">'+coloredCarSVG('#bbbbbb','pending')+'<div class="vc-label">'+c.n+'</div><div class="vc-status" style="color:var(--tx4);">Queued</div></div>'+
+      '<button class="vc-color-btn" onclick="openCellColor(event,'+i+',\''+c.n+'\',\''+hex+'\')" title="Change color/shade"><i class="ti ti-palette"></i></button>';
+    grid.appendChild(cell);
+  }
+  buildReviewGrid(cnt);
+}
+function runGeneration(){
+  var bar=document.getElementById('gen-bar');
+  var status=document.getElementById('gen-status');
+  var badge=document.getElementById('gen-badge');
+  var cells=document.querySelectorAll('#variant-grid .variant-cell');
+  var cnt=cells.length;var i=0;
+  clearInterval(ST.genInt);
+  // Mark current as generating
+ST.genInt=setInterval(function(){
+    if(i<cnt){
+      var cell=cells[i];
+      var nm=cell.dataset.name;
+      var hex=cell.dataset.hex;
+      var isErr=(nm==='Silver');
+      cell.className='variant-cell '+(isErr?'error':'done');
+      var icon=isErr?'<i class="ti ti-alert-circle" style="color:var(--err);"></i>':'<i class="ti ti-car"></i>';
+      cell.innerHTML=
+        '<div class="vc-swatch" style="background:'+hex+';"></div>'+
+        '<div class="vc-body">'+icon+
+          '<div class="vc-label">'+nm+'</div>'+
+          '<div class="vc-status">'+(isErr?'⚠ Check color':'✓ Done')+'</div>'+
+        '</div>'+
+        '<button class="vc-color-btn" onclick="openCellColor(event,'+i+',\''+nm+'\',\''+hex+'\')" title="Change shade"><i class="ti ti-palette"></i></button>'+
+        (isErr?'<div class="vc-fix-btn" onclick="openFixModal(\''+nm+'\')">Fix</div>':'');
+      bar.style.width=Math.round(((i+1)/cnt)*100)+'%';
+      status.textContent=(i+1)+'/'+cnt+' generated · '+(cnt-i-1)+' remaining';
+      badge.className='badge b-amber';badge.textContent='Generating ('+(i+1)+'/'+cnt+')';
+      i++;
+    } else {
+      clearInterval(ST.genInt);
+      badge.className='badge b-green';badge.textContent='Complete';
+      status.textContent='All '+cnt+' variants generated';
+      document.getElementById('grid-approve-row').style.display='flex';
+      STEPPERS.generate.active=0;updateStepper('generate');
+    }
+  },320);
+}
+function approveGridAndContinue(){
+  document.getElementById('grid-approve-row').style.display='none';
+  var lifeCard=document.getElementById('life-gen-card');
+  lifeCard.classList.remove('muted','dashed');
+  document.getElementById('life-gen-badge').className='badge b-amber';
+  document.getElementById('life-gen-badge').textContent='Generating…';
+  document.getElementById('life-gen-waiting').style.display='none';
+  var strip=document.getElementById('lifestyle-strip');
+  strip.style.display='grid';
+  document.getElementById('lifestyle-gen-note').style.display='block';
+  STEPPERS.generate.active=1;updateStepper('generate');
+  var labels=[['Blue · rider · urban India','#2563eb'],['Silver · standing · campus','#9ca3af'],['White · city · minimal','#f5f5f5']];
+  var lps=['lp1','lp2','lp3'];
+  lps.forEach(function(id,i){
+    setTimeout(function(){
+      var el=document.getElementById(id);
+      if(!el)return;
+      el.className='lp-card';
+      el.innerHTML='<i class="ti ti-loader spin" style="font-size:22px;color:var(--acc3);"></i><small>'+labels[i][0]+'</small>';
+      setTimeout(function(){
+        el.className='lp-card done';
+        el.innerHTML='<div style="width:100%;height:4px;background:'+labels[i][1]+';border-radius:2px;margin-bottom:4px;"></div><i class="ti ti-photo" style="font-size:20px;"></i><small>'+labels[i][0]+'</small>';
+      },900);
+    },i*800);
+  });
+  setTimeout(function(){
+    document.getElementById('lifestyle-gen-note').style.display='none';
+    document.getElementById('life-gen-badge').className='badge b-green';
+    document.getElementById('life-gen-badge').textContent='Complete';
+    document.getElementById('life-gen-divider').style.display='block';
+    document.getElementById('life-gen-approve-row').style.display='flex';
+    showToast('All outputs ready — review now');
+  },4000);
+}
+
+// ══ CELL COLOR PICKER ══
+function openCellColor(e,idx,name,hex){
+  e.stopPropagation();
+  ST.activeCell={idx:idx,name:name,hex:hex};
+  document.getElementById('ccp-cell-name').textContent=name;
+  // Main color swatches
+  var main=document.getElementById('ccp-main-swatches');
+  main.innerHTML='';
+  COLORS.forEach(function(c){
+    var sw=document.createElement('div');
+    sw.className='ccp-swatch'+(c.n===name?' active':'');
+    sw.style.cssText='width:22px;height:22px;border-radius:4px;border:1.5px solid '+(c.n===name?'var(--tx)':'var(--bd)')+';cursor:pointer;background:'+c.h+';';
+    sw.title=c.n;
+    sw.onclick=function(){
+      document.querySelectorAll('#ccp-main-swatches .ccp-swatch').forEach(function(s){s.style.border='1.5px solid var(--bd)'});
+      this.style.border='1.5px solid var(--tx)';
+      ST.activeCell.name=c.n;ST.activeCell.hex=c.h;
+      buildCCPShades(c.n);
+      document.getElementById('ccp-custom-color').value=c.h;
+    };
+    main.appendChild(sw);
+  });
+  buildCCPShades(name);
+  document.getElementById('ccp-custom-color').value=hex;
+  openModal('cell-color-modal');
+}
+function buildCCPShades(name){
+  var shades=SHADES[name]||[];
+  var cont=document.getElementById('ccp-shade-swatches');
+  cont.innerHTML='';
+  shades.forEach(function(s){
+    var sw=document.createElement('div');
+    sw.className='shade-sub-sw';
+    sw.style.background=s;sw.title=s;
+    sw.onclick=function(){
+      document.querySelectorAll('#ccp-shade-swatches .shade-sub-sw').forEach(function(x){x.classList.remove('active')});
+      this.classList.add('active');ST.activeCell.hex=s;
+      document.getElementById('ccp-custom-color').value=s;
+    };
+    cont.appendChild(sw);
+  });
+}
+function applyCellCustomColor(hex){ST.activeCell.hex=hex;}
+function confirmCellColor(){
+  if(!ST.activeCell)return;
+  var idx=ST.activeCell.idx;
+  ST.cellColors[idx]=ST.activeCell.hex;
+  // Update cell swatch in variant grid
+  var cells=document.querySelectorAll('#variant-grid .variant-cell');
+  if(cells[idx]){
+    var sw=cells[idx].querySelector('.vc-swatch');
+    if(sw)sw.style.background=ST.activeCell.hex;
+    cells[idx].dataset.hex=ST.activeCell.hex;
+    cells[idx].dataset.name=ST.activeCell.name;
+    var lbl=cells[idx].querySelector('.vc-label');
+    if(lbl)lbl.textContent=ST.activeCell.name;
+  }
+  closeModal('cell-color-modal');
+  showToast('Color updated to '+ST.activeCell.name);
+}
+
+// ══ REVIEW ══
+function buildReviewGrid(cnt){
+  var grid=document.getElementById('review-grid');
+  var cols=Math.min(ST.gridCols,4);
+  grid.style.gridTemplateColumns='repeat('+cols+',1fr)';
+  grid.innerHTML='';
+  for(var i=0;i<Math.min(cnt,COLORS.length);i++){
+    var c=COLORS[i];
+    var hex=ST.cellColors[i]||c.h;
+    var isErr=(c.n==='Silver');
+    var cell=document.createElement('div');
+    cell.className='rv-cell'+(isErr?' flagged':' approved');
+    if(isErr)cell.id='rv-silver';
+    cell.onclick=function(){
+      document.querySelectorAll('.rv-cell').forEach(function(x){x.classList.remove('selected')});
+      this.classList.add('selected');
+    };
+    cell.innerHTML=
+      '<div class="rv-swatch" style="background:'+hex+';"></div>'+
+      '<div class="rv-body">'+
+        '<i class="ti ti-car'+(isErr?' ti-alert-circle':'')+'"></i>'+
+        '<div class="rv-label">'+c.n+(isErr?' ⚠':' ✓')+'</div>'+
+      '</div>'+
+      '<div class="rv-check"><i class="ti ti-check" style="font-size:9px;"></i></div>'+
+      (isErr?'<div class="rv-fix-btn" onclick="openFixModal(\''+c.n+'\')">Fix</div>':'');
+    grid.appendChild(cell);
+  }
+}
+function approveAllVariants(){
+  document.querySelectorAll('.rv-cell').forEach(function(c){c.className='rv-cell approved';var l=c.querySelector('.rv-label');if(l)l.textContent=l.textContent.replace(' ⚠',' ✓');c.id='';});
+  document.getElementById('rv-m1-badge').textContent='12/12 approved';
+  document.getElementById('rv-m1-badge').className='badge b-green';
+  ST.m1ok=true;showToast('All variants approved');checkReadyToDeliver();
+  STEPPERS.review.active=1;updateStepper('review');
+}
+function approveLS(el){
+  el.classList.toggle('approved');
+  if(document.querySelectorAll('#screen-review .ls-card.approved').length===3){ST.m2ok=true;checkReadyToDeliver();STEPPERS.review.active=2;updateStepper('review');}
+}
+function approveAllLS(){
+  document.querySelectorAll('#screen-review .ls-card').forEach(function(c){c.classList.add('approved')});
+  ST.m2ok=true;showToast('All lifestyle images approved');checkReadyToDeliver();
+  STEPPERS.review.active=2;updateStepper('review');
+}
+function regenLS(){
+  var f=document.querySelector('#screen-review .ls-card');
+  if(!f)return;f.classList.remove('approved');
+  f.innerHTML='<i class="ti ti-loader spin"></i><small>Regenerating…</small>';
+  showToast('Regenerating…');
+  setTimeout(function(){f.innerHTML='<i class="ti ti-photo"></i><small>Blue · rider · urban India</small>';showToast('Scene regenerated');},2000);
+}
+function checkReadyToDeliver(){
+  var noErr=document.querySelectorAll('.rv-cell.flagged').length===0;
+  if(noErr&&ST.m2ok){
+    document.getElementById('rv-ready').style.display='block';
+    document.getElementById('rv-deliver-btn').style.display='flex';
+  }
+}
+function goDelivery(){STEPPERS.review.active=2;goTab('deliver');document.getElementById('tab-review').classList.add('done');}
+
+// ══ FIX MODAL ══
+var FIX_TARGET=null;
+function openFixModal(colorName){
+  FIX_TARGET=colorName;
+  document.getElementById('fix-name').textContent=colorName||'selected';
+  var shades=SHADES[colorName]||['#9ca3af'];
+  var row=document.getElementById('fix-shade-row');
+  row.innerHTML='';
+  shades.forEach(function(s,i){
+    var sw=document.createElement('div');
+    sw.className='shade-fix-sw'+(i===0?' active':'');
+    sw.style.background=s;sw.title=s;
+    sw.onclick=function(){document.querySelectorAll('.shade-fix-sw').forEach(function(x){x.classList.remove('active')});this.classList.add('active');};
+    row.appendChild(sw);
+  });
+  document.getElementById('fix-desc').value='';
+  openModal('fix-modal');
+}
+function applyColorFix(){
+  closeModal('fix-modal');
+  var nm=FIX_TARGET||'Silver';
+  // Fix in both variant grid and review grid
+  ['#variant-grid','#review-grid'].forEach(function(sel){
+    var cells=document.querySelectorAll(sel+' [data-name="'+nm+'"],.rv-cell#rv-silver');
+    cells.forEach(function(cell){
+      cell.className=(sel==='#variant-grid'?'variant-cell':'rv-cell')+' generating';
+      cell.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;min-height:70px;gap:4px;"><i class="ti ti-loader spin" style="font-size:18px;color:var(--acc3);"></i><div style="font-size:9px;color:var(--tx3);">Fixing '+nm+'…</div></div>';
+    });
+  });
+  showToast('Regenerating '+nm+' with fix…');
+  setTimeout(function(){
+    var hex=SHADES[nm]?SHADES[nm][0]:'#9ca3af';
+    document.querySelectorAll('#variant-grid .variant-cell.generating').forEach(function(cell){
+      cell.className='variant-cell done';
+      cell.innerHTML='<div class="vc-swatch" style="background:'+hex+';"></div><div class="vc-body">'+coloredCarSVG(hex,'done')+'<div class="vc-label">'+nm+' ✓</div><div class="vc-status">Fixed</div></div>';
+    });
+    var rv=document.getElementById('rv-silver');
+    if(rv){
+      rv.className='rv-cell approved';rv.id='';
+      rv.innerHTML='<div class="rv-swatch" style="background:'+hex+';"></div><div class="rv-body"><i class="ti ti-car"></i><div class="rv-label">'+nm+' ✓</div></div><div class="rv-check"><i class="ti ti-check" style="font-size:9px;"></i></div>';
+    }
+    document.getElementById('rv-m1-badge').textContent='12/12 passed';
+    document.getElementById('rv-m1-badge').className='badge b-green';
+    showToast(nm+' fixed — QA passed');
+    checkReadyToDeliver();
+  },2200);
+}
+
+// ══ JOB HISTORY ══
+function openJobDetail(id){
+  var d=JOBS[id];if(!d)return;
+  document.getElementById('jd-ico-i').className='ti '+d.ico;
+  document.getElementById('jd-title').textContent=d.t;
+  document.getElementById('jd-meta2').textContent=d.m;
+  document.getElementById('jd-ind').textContent=d.ind;
+  document.getElementById('jd-geo').textContent=d.geo;
+  document.getElementById('jd-aud').textContent=d.aud;
+  document.getElementById('jd-use').textContent=d.use;
+  document.getElementById('jd-grid').textContent=d.grid;
+  document.getElementById('jd-cost').textContent=d.cost;
+  document.getElementById('jd-d1n').textContent=d.d1n;
+  document.getElementById('jd-d1m').textContent=d.d1m;
+  document.getElementById('jd-d2n').textContent=d.d2n;
+  document.getElementById('jd-d2m').textContent=d.d2m;
+  var tg=document.getElementById('jd-thumbs');
+  var cols=Math.min(d.cols,4);
+  var tot=d.cols*d.rows;
+  tg.style.gridTemplateColumns='repeat('+cols+',1fr)';
+  tg.innerHTML='';
+  for(var i=0;i<Math.min(tot,COLORS.length);i++){
+    var c=COLORS[i];var hex=c.h;
+    var cell=document.createElement('div');
+    cell.className='jd-cell';
+    cell.innerHTML='<div class="jd-cell-swatch" style="background:'+hex+';"></div><div class="jd-cell-body"><i class="ti '+d.ico+'"></i><small>'+c.n+'</small></div>';
+    tg.appendChild(cell);
+  }
+  document.getElementById('hist-list').style.display='none';
+  document.getElementById('hist-detail').style.display='block';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function closeJobDetail(){
+  document.getElementById('hist-detail').style.display='none';
+  document.getElementById('hist-list').style.display='block';
+}
+function rerunJobFromDetail(){closeJobDetail();goTab('setup');showToast('Job config loaded — update image and start');}
+
+// ══ PROMPT LIBRARY EDITOR (from Jobs) ══
+function openPromptLibraryEditor(name){
+  if(name){
+    document.getElementById('plib-title').textContent='Prompt editor — '+name;
+    document.getElementById('plib-textarea').value=PROMPT_TEMPLATES[name]||'Enter your prompt here…';
+  } else {
+    document.getElementById('plib-title').textContent='New prompt template';
+    document.getElementById('plib-textarea').value='Generate a photorealistic [MODEL] in [COLOR].\n// Describe your requirements below:';
+  }
+  document.getElementById('plib-pills').innerHTML='';
+  document.querySelectorAll('#plib-modal .guided-chip').forEach(function(c){c.classList.remove('sel')});
+  openModal('plib-modal');
+}
+function applyGuideLib(el,txt){
+  el.classList.toggle('sel');
+  if(el.classList.contains('sel')){
+    var ta=document.getElementById('plib-textarea');
+    ta.value=ta.value+'\n// '+txt;
+    var pill=document.createElement('div');pill.className='sug-pill';pill.textContent=txt;
+    pill.onclick=function(){el.classList.remove('sel');this.remove();ta.value=ta.value.replace('\n// '+txt,'');};
+    document.getElementById('plib-pills').appendChild(pill);
+  }
+}
+function useLibPromptInJob(){
+  var val=document.getElementById('plib-textarea').value;
+  ST.promptText=val;
+  document.getElementById('prompt-display').textContent=val;
+  closeModal('plib-modal');
+  goTab('setup');
+  STEPPERS.setup.active=4;updateStepper('setup');
+  showToast('Prompt loaded — review in Step 5');
+}
+function savePlibPrompt(){showToast('Prompt saved to library');closeModal('plib-modal');}
+
+// ══ NIGHT ══
+function toggleNight(){
+  ST.night=!ST.night;
+  document.body.classList.toggle('night',ST.night);
+  document.getElementById('night-icon').className=ST.night?'ti ti-sun':'ti ti-moon';
+  document.getElementById('night-lbl').textContent=ST.night?'Day':'Night';
+  var pt=document.getElementById('profile-night-tog');
+  if(pt){pt.classList.toggle('on',ST.night);pt.classList.toggle('off',!ST.night);}
+}
+function toggleNightFromProfile(){ST.night=!ST.night;document.body.classList.toggle('night',ST.night);var i=document.getElementById('night-icon');if(i)i.className=ST.night?'ti ti-sun':'ti ti-moon';var l=document.getElementById('night-lbl');if(l)l.textContent=ST.night?'Day':'Night';}
+
+// ══ MODALS ══
+function openModal(id){document.getElementById(id).classList.add('open')}
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+function closeOverlay(e,id){if(e.target===e.currentTarget)closeModal(id);}
+
+// ══ TOAST ══
+var toastT=null;
+function showToast(msg){
+  var t=document.getElementById('toast');
+  document.getElementById('toast-msg').textContent=msg;
+  t.classList.add('show');
+  if(toastT)clearTimeout(toastT);
+  toastT=setTimeout(function(){t.classList.remove('show')},2800);
+}
+
+// ══ INIT ══
+adjGrid('c',0);
+updatePromptDisplay();
+// App starts on cover page - app page is hidden
+// stepper hidden until needed
+
+// Close shade pickers on outside click
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.cell-color-picker'))
+    document.querySelectorAll('.cell-color-picker.open').forEach(function(p){p.classList.remove('open')});
+});
+</script>
+</body>
+</html>
