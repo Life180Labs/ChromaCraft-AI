@@ -57,6 +57,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redispw
+      - STORAGE_PATH=/app/storage
     depends_on:
       redis:
         condition: service_healthy

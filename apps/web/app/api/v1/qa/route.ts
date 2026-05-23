@@ -34,10 +34,9 @@ export async function POST(req: NextRequest) {
       data: { status },
     });
 
-    // Check if all variants for the job are reviewed (approved/rejected)
-    // and decide if the job should move to COMPLETED
+    // Check if all processed catalog assets for the job are reviewed
     const allJobAssets = await prisma.asset.findMany({
-      where: { jobId: asset.jobId, type: 'variant' },
+      where: { jobId: asset.jobId, type: 'processed' },
     });
 
     const pendingReview = allJobAssets.some(a => a.status === 'pending');

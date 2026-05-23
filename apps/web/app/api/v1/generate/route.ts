@@ -73,12 +73,17 @@ export async function POST(req: NextRequest) {
     });
 
     // Enqueue generation in BullMQ
+    const catalogSettings = {
+      ...(settings || {}),
+      prefix: settings?.prefix || job.name.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_-]/g, ''),
+    };
+
     await generateQueue.add('process-generation', {
       jobId: job.id,
       prompt,
       provider: providerName,
       apiKey,
-      settings: settings || {},
+      settings: catalogSettings,
     });
 
     return NextResponse.json({ success: true, message: 'Generation started' });

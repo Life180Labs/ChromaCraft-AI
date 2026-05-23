@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "start": "ts-node worker.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "e2e:python": "python python/e2e_smoke.py"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",

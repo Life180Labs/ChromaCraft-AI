@@ -171,7 +171,7 @@ const generateWorker = new Worker(
         '--jobId', String(jobId),
         '--prompt', prompt,
         '--provider', provider,
-        '--apiKey', apiKey,
+        '--apiKey', apiKey || 'none',
         '--outDir', jobAssetDir,
         '--colors', colorsArg,
       ]);

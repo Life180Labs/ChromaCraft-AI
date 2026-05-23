@@ -119,7 +119,7 @@ def main() -> None:
     parser.add_argument("--jobId", required=True, help="Job identifier")
     parser.add_argument("--prompt", required=True, help="Prompt text")
     parser.add_argument("--provider", required=True, help="AI Provider name")
-    parser.add_argument("--apiKey", default="", help="Provider API Key")
+    parser.add_argument("--apiKey", default="none", help="Provider API Key")
     parser.add_argument("--outDir", required=True, help="Output directory path")
     parser.add_argument(
         "--colors",
@@ -142,7 +142,7 @@ def main() -> None:
 
     for color in colors:
         try:
-            if not args.apiKey or provider_lower == "mock":
+            if not args.apiKey or args.apiKey == "none" or provider_lower == "mock":
                 generate_mock_image(args.jobId, args.prompt, color, args.outDir)
             elif "openai" in provider_lower:
                 generate_openai_image(args.prompt, color, args.apiKey, args.outDir)

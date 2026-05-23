@@ -12,8 +12,13 @@ type ReviewQAProps = {
   onQAReview: (assetId: number, status: 'approved' | 'rejected') => void;
 };
 
+function assetLabel(path: string): string {
+  const base = path.split(/[/\\]/).pop() || path;
+  return base.replace(/\.png$/i, '');
+}
+
 export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs, selectedJob, onSelectJob, onQAReview }) => {
-  const variants = selectedJob?.assets?.filter(a => a.type === 'variant') || [];
+  const qaAssets = selectedJob?.assets?.filter(a => a.type === 'processed') || [];
 
   return (
     <div className="screen active">
@@ -37,17 +42,17 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs, selectedJob, onSelectJ
 
         {!selectedJob && <p style={{ color: 'var(--tx3)' }}>Please select a job first.</p>}
 
-        {selectedJob && variants.length === 0 && (
-          <p style={{ color: 'var(--tx3)', fontSize: 12 }}>No variants generated yet for this job.</p>
+        {selectedJob && qaAssets.length === 0 && (
+          <p style={{ color: 'var(--tx3)', fontSize: 12 }}>No processed catalog images ready for QA yet.</p>
         )}
 
-        {selectedJob && variants.length > 0 && (
-          <div className="variant-grid-display" style={{ gridTemplateColumns: `repeat(${Math.min(variants.length, 4)}, 1fr)` }}>
-            {variants.map((asset) => (
+        {selectedJob && qaAssets.length > 0 && (
+          <div className="variant-grid-display" style={{ gridTemplateColumns: `repeat(${Math.min(qaAssets.length, 4)}, 1fr)` }}>
+            {qaAssets.map((asset) => (
               <div key={asset.id} className={`variant-cell ${asset.status === 'approved' ? 'done' : asset.status === 'rejected' ? 'error' : 'pending'}`}>
                 <div className="vc-body">
                   <div className="vc-car">🖼️</div>
-                  <span className="vc-label">Variant #{asset.id}</span>
+                  <span className="vc-label">{assetLabel(asset.path)}</span>
                   <span className="vc-status">{asset.status}</span>
                   <div className="btn-row" style={{ marginTop: 8 }}>
                     <Button variant="ghost" onClick={() => onQAReview(asset.id, 'approved')}>

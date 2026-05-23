@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    const approvedAssets = job.assets.filter(a => a.type === 'variant' && a.status === 'approved');
+    const approvedAssets = job.assets.filter(a => a.type === 'processed' && a.status === 'approved');
 
     if (approvedAssets.length === 0) {
       return NextResponse.json({ error: 'No approved assets to export' }, { status: 400 });
