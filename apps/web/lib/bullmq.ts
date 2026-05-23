@@ -12,6 +12,7 @@ export const connection = new IORedis(redisConfig);
 // Define queues
 export const uploadQueue = new Queue('upload', { connection });
 export const generateQueue = new Queue('generate', { connection });
+export const processingQueue = new Queue('processing', { connection });
 export const qaQueue = new Queue('qa', { connection });
 
 // Export a worker factory (used in the Node worker)
