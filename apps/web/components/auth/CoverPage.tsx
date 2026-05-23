@@ -128,7 +128,7 @@ export const CoverPage: React.FC<CoverPageProps> = ({ onLogin, onSignup, loading
                   <button className="pw-toggle" type="button" onClick={() => setShowPassword(!showPassword)}><TbEye /></button>
                 </div>
               </div>
-              <div className="forgot">Forgot password?</div>
+              <div className="forgot" onClick={() => { const email = prompt('Enter your email address for password reset:'); if (email) { fetch('/api/v1/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(() => alert('If that email exists, a password reset link has been sent.')).catch(() => alert('Could not send reset link. Please try again later.')); } }} style={{ cursor: 'pointer' }}>Forgot password?</div>
               <Button type="submit" className="primary" style={{ width: '100%', justifyContent: 'center', padding: '10px' }} disabled={loading}>
                 <TbLogin /> {loading ? 'Signing in...' : 'Sign in'}
               </Button>

@@ -15,13 +15,20 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs, on
   const completedCount = jobs.filter(j => j.status === 'COMPLETED').length;
   const totalAssets = jobs.reduce((acc, j) => acc + (j.assets?.length || 0), 0);
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
   return (
     <div className="screen active">
       {/* Greeting header — matches prototype home screen */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
         <div>
           <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '20px', fontWeight: 500, color: 'var(--tx)' }}>
-            Welcome back, {userName} 👋
+            {getGreeting()}, {userName} 👋
           </div>
           <div style={{ fontSize: '12px', color: 'var(--tx3)', marginTop: '2px' }}>
             Life180 Labs · Free plan · <a style={{ color: 'var(--acc)', cursor: 'pointer' }}>Upgrade</a>

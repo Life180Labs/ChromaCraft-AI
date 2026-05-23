@@ -1,5 +1,15 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+// @ts-ignore
+import dotenv from 'dotenv';
+// @ts-ignore
+import bcrypt from 'bcrypt';
 import { PrismaClient } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 const prisma = new PrismaClient();
 
@@ -10,7 +20,7 @@ async function main() {
     update: {},
     create: {
       email: 'admin@life180labs.com',
-      password: passwordHash,
+      passwordHash: passwordHash,
       role: 'ADMIN',
     },
   });

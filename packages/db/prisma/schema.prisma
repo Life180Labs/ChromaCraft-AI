@@ -34,6 +34,7 @@ model User {
   emailVerified DateTime?
   image         String?
   role          Role            @default(USER)
+  twoFactorEnabled Boolean         @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   jobs          Job[]

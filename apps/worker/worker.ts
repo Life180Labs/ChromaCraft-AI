@@ -5,16 +5,38 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import dotenv from 'dotenv';
+const __dirname = process.cwd();
 
-dotenv.config();
+let envPath = path.resolve(process.cwd(), '.env');
+if (!fs.existsSync(envPath)) {
+  envPath = path.resolve(process.cwd(), '../../.env');
+}
+dotenv.config({ path: envPath });
 
 const logger = pino({ name: 'chromacraft-worker' });
 const prisma = new PrismaClient();
 
+let redisHost = process.env.REDIS_HOST || 'localhost';
+let redisPort = Number(process.env.REDIS_PORT) || 6379;
+let redisPassword = process.env.REDIS_PASSWORD || undefined;
+
+if (process.env.REDIS_URL) {
+  try {
+    const parsed = new URL(process.env.REDIS_URL);
+    redisHost = parsed.hostname;
+    redisPort = Number(parsed.port) || 6379;
+    if (parsed.password) {
+      redisPassword = parsed.password;
+    }
+  } catch (e) {
+    console.warn('Failed to parse REDIS_URL, using defaults');
+  }
+}
+
 const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: Number(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+  host: redisHost,
+  port: redisPort,
+  password: redisPassword,
 };
 
 /** UC1 standard automotive catalog colors per BRD. */
@@ -150,7 +172,10 @@ const generateWorker = new Worker(
     logger.info({ jobId, provider }, 'Starting generation');
 
     try {
-      const dbJob = await prisma.job.findUnique({ where: { id: jobId } });
+      const dbJob = await prisma.job.findUnique({
+        where: { id: jobId },
+        include: { assets: true },
+      });
       if (!dbJob) {
         throw new Error(`Job ${jobId} not found`);
       }
@@ -167,14 +192,23 @@ const generateWorker = new Worker(
       const prefix = deriveFilenamePrefix(dbJob.name, settings);
       const colorsArg = colors.join(',');
 
-      const { exitCode, stderr } = await runPythonScript('generate.py', [
+      const refAsset = dbJob.assets.find(a => a.type === 'original');
+      const refImagePath = refAsset ? refAsset.path : '';
+
+      const args = [
         '--jobId', String(jobId),
         '--prompt', prompt,
         '--provider', provider,
         '--apiKey', apiKey || 'none',
         '--outDir', jobAssetDir,
         '--colors', colorsArg,
-      ]);
+      ];
+
+      if (refImagePath) {
+        args.push('--refImage', refImagePath);
+      }
+
+      const { exitCode, stderr } = await runPythonScript('generate.py', args);
 
       if (exitCode !== 0) {
         throw new Error(`Python generation script failed (exit ${exitCode}): ${stderr}`);
@@ -196,7 +230,7 @@ const generateWorker = new Worker(
             jobId,
             type: 'variant',
             path: filePath,
-            status: 'pending',
+            status: 'done',
           },
         });
         createdAssets.push(asset);

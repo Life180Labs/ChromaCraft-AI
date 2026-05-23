@@ -14,10 +14,16 @@ export async function GET(req: NextRequest) {
         id: true,
         name: true,
         default: true,
-        // Omit apiKey for security
+        apiKey: true,
       },
     });
-    return NextResponse.json(providers);
+
+    return NextResponse.json(
+      providers.map(({ apiKey, ...provider }) => ({
+        ...provider,
+        hasApiKey: Boolean(apiKey?.trim()),
+      }))
+    );
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
@@ -30,11 +36,24 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
     const { name, apiKey, isDefault } = await req.json();
-    if (!name || !apiKey) {
-      return NextResponse.json({ error: 'name and apiKey are required' }, { status: 400 });
+    if (!name) {
+      return NextResponse.json({ error: 'name is required' }, { status: 400 });
     }
 
-    // If setting as default, unset others first
+    const existing = await prisma.aiProvider.findUnique({ where: { name } });
+    const preserveKey = !apiKey || apiKey === 'unchanged';
+
+    if (!existing && preserveKey && name.toLowerCase() !== 'mock') {
+      return NextResponse.json({ error: 'apiKey is required for new providers' }, { status: 400 });
+    }
+
+    const resolvedKey =
+      preserveKey && existing
+        ? existing.apiKey
+        : preserveKey && name.toLowerCase() === 'mock'
+          ? 'mock'
+          : apiKey;
+
     if (isDefault) {
       await prisma.aiProvider.updateMany({
         where: { default: true },
@@ -44,8 +63,15 @@ export async function POST(req: NextRequest) {
 
     const provider = await prisma.aiProvider.upsert({
       where: { name },
-      update: { apiKey, default: !!isDefault },
-      create: { name, apiKey, default: !!isDefault },
+      update: {
+        ...(preserveKey && existing ? {} : { apiKey: resolvedKey }),
+        ...(typeof isDefault === 'boolean' ? { default: isDefault } : {}),
+      },
+      create: {
+        name,
+        apiKey: resolvedKey,
+        default: !!isDefault,
+      },
     });
 
     return NextResponse.json({

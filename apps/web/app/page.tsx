@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
 import type { TabId, Job, Provider } from '../components/shared/types';
+import { TbLoader } from 'react-icons/tb';
 
 // Feature components
 import { CoverPage } from '../components/auth/CoverPage';
@@ -12,13 +13,28 @@ import { GeneratePanel } from '../components/workflow/GeneratePanel';
 import { ReviewQA } from '../components/workflow/ReviewQA';
 import { DeliverExport } from '../components/workflow/DeliverExport';
 import { JobHistory } from '../components/workflow/JobHistory';
+import { ProfileSettings } from '../components/profile/ProfileSettings';
 
 // Layout
 import { TopBar } from '../components/layout/TopBar';
-import { WorkflowTabs } from '../components/layout/WorkflowTabs';
+
+const UC1_STANDARD_COLORS = [
+  'White',
+  'Black',
+  'Blue',
+  'Red',
+  'Green',
+  'Brown',
+  'Silver',
+  'Yellow',
+  'Cream',
+  'Pink',
+  'Dark Blue',
+  'Orange',
+];
 
 export default function Home() {
-  const { data: session, status: authStatus } = useSession();
+  const { data: session, status: authStatus, update } = useSession();
 
   // Navigation
   const [activeTab, setActiveTab] = useState<TabId>('home');
@@ -30,13 +46,29 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState('');
 
-  // Upload
-  const [jobName, setJobName] = useState('');
+  // Setup configuration state (Prototype Steps 1 to 5)
+  const [industry, setIndustry] = useState<string>('Automotive');
+  const [modelName, setModelName] = useState<string>('');
+  const [filenamePrefix, setFilenamePrefix] = useState<string>('');
+  const [targetAudience, setTargetAudience] = useState<string>('General consumers');
+  const [targetMarket, setTargetMarket] = useState<string>('India');
+  const [targetPurpose, setTargetPurpose] = useState<string>('Product catalog');
+  
+  // Output steps & color configuration
+  const [gridCols, setGridCols] = useState<number>(4);
+  const [gridRows, setGridRows] = useState<number>(3);
+  const [lifestyleEnabled, setLifestyleEnabled] = useState<boolean>(false);
+  const [videoEnabled, setVideoEnabled] = useState<boolean>(false);
+  const [spinEnabled, setSpinEnabled] = useState<boolean>(false);
+  const [cropsEnabled, setCropsEnabled] = useState<boolean>(false);
+  const [customColors, setCustomColors] = useState<string[]>([...UC1_STANDARD_COLORS]);
+
+  // Upload/File variables
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState('');
 
-  // Generate
-  const [promptText, setPromptText] = useState('Luxury leather bag with clean minimalist studio lighting, high resolution, product shot');
+  // Generate / Prompt
+  const [promptText, setPromptText] = useState('Generate a photorealistic [] in [COLOR] paint.');
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
 
@@ -53,6 +85,40 @@ export default function Home() {
   useEffect(() => {
     if (session) { fetchJobs(); fetchProviders(); }
   }, [session]);
+
+  // Update promptText dynamically when setup parameters change
+  useEffect(() => {
+    const prompt = `Generate a photorealistic [${modelName || 'Mitsubishi ASX'}] in [COLOR] paint.\nAudience: ${targetAudience.toLowerCase()} · ${targetMarket.toLowerCase()} market.\nUse: ${targetPurpose.toLowerCase()}.\nView: front-right three-quarter. Drive: LHD.\nPlate: white, blank. Background: pure white. No overlap.`;
+    setPromptText(prompt);
+  }, [modelName, targetAudience, targetMarket, targetPurpose]);
+
+  // Polling effect for active job status during generation
+  useEffect(() => {
+    if (activeTab !== 'generate' && activeTab !== 'review') return;
+    if (!selectedJob) return;
+    if (selectedJob.status !== 'PENDING' && selectedJob.status !== 'PROCESSING') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/v1/jobs');
+        if (res.ok) {
+          const updatedJobs: Job[] = await res.json();
+          setJobs(updatedJobs);
+          const currentJob = updatedJobs.find((j) => j.id === selectedJob.id);
+          if (currentJob) {
+            setSelectedJob(currentJob);
+            if (currentJob.status !== 'PENDING' && currentJob.status !== 'PROCESSING') {
+              clearInterval(interval);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Polling error:', e);
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [activeTab, selectedJob]);
 
   // ── API Handlers ──
 
@@ -110,24 +176,69 @@ export default function Home() {
     if (!uploadFile) { setUploadError('Please select a file to upload'); return; }
     setUploadError('');
     setLoading(true);
+
     const formData = new FormData();
     formData.append('file', uploadFile);
-    formData.append('name', jobName || uploadFile.name);
+    formData.append('name', modelName || uploadFile.name);
+
     try {
-      const res = await fetch('/api/v1/upload', { method: 'POST', body: formData });
+      // 1. Upload File & Create Job
+      const uploadRes = await fetch('/api/v1/upload', { method: 'POST', body: formData });
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json();
+        setUploadError(errData.error || 'Upload failed');
+        setLoading(false);
+        return;
+      }
+      const uploadData = await uploadRes.json();
+      const job = uploadData.job;
+
+      // 2. Trigger Generation API immediately with unified settings
+      const settings = {
+        prefix: filenamePrefix || (modelName || uploadFile.name).trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_-]/g, ''),
+        colors: customColors.slice(0, gridCols * gridRows),
+        cols: gridCols,
+        rows: gridRows,
+        industry,
+        targetMarket,
+        targetAudience,
+        targetPurpose,
+        lifestyleEnabled,
+        videoEnabled,
+        spinEnabled,
+        cropsEnabled,
+      };
+
+      const generateRes = await fetch('/api/v1/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: job.id,
+          prompt: promptText,
+          providerId: selectedProviderId,
+          settings,
+        }),
+      });
+
       setLoading(false);
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedJob(data.job);
-        fetchJobs();
+      if (generateRes.ok) {
+        // Fetch jobs to get latest processing state
+        const updatedJobsRes = await fetch('/api/v1/jobs');
+        if (updatedJobsRes.ok) {
+          const updatedJobs = await updatedJobsRes.json();
+          setJobs(updatedJobs);
+          const currentJob = updatedJobs.find((j: Job) => j.id === job.id);
+          if (currentJob) setSelectedJob(currentJob);
+        }
+        // Redirect to generate progress tab
         setActiveTab('generate');
       } else {
-        const data = await res.json();
-        setUploadError(data.error || 'Upload failed');
+        const errData = await generateRes.json();
+        setUploadError(errData.error || 'Generation trigger failed');
       }
-    } catch {
+    } catch (err: any) {
       setLoading(false);
-      setUploadError('Upload failed');
+      setUploadError(err.message || 'Workflow initialization failed');
     }
   };
 
@@ -189,8 +300,16 @@ export default function Home() {
 
   // ── Render ──
 
-  if (authStatus !== 'authenticated') {
+  if (authStatus === 'unauthenticated') {
     return <CoverPage onLogin={handleLogin} onSignup={handleSignup} loading={loading} authError={authError} />;
+  }
+
+  if (authStatus === 'loading') {
+    return (
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+        <TbLoader className="spin" size={32} style={{ color: 'var(--acc)' }} />
+      </div>
+    );
   }
 
   const userName = session?.user?.name || 'User';
@@ -201,15 +320,81 @@ export default function Home() {
       case 'home':
         return <DashboardHome userName={userName} jobs={jobs} onNavigate={setActiveTab} onSelectJob={setSelectedJob} />;
       case 'setup':
-        return <UploadSetup jobName={jobName} onJobNameChange={setJobName} uploadFile={uploadFile} onFileChange={setUploadFile} uploadError={uploadError} loading={loading} onSubmit={handleUpload} />;
+        return (
+          <UploadSetup
+            uploadFile={uploadFile}
+            onFileChange={setUploadFile}
+            uploadError={uploadError}
+            loading={loading}
+            onSubmit={handleUpload}
+            industry={industry}
+            onIndustryChange={setIndustry}
+            modelName={modelName}
+            onModelNameChange={setModelName}
+            filenamePrefix={filenamePrefix}
+            onFilenamePrefixChange={setFilenamePrefix}
+            targetAudience={targetAudience}
+            onTargetAudienceChange={setTargetAudience}
+            targetMarket={targetMarket}
+            onTargetMarketChange={setTargetMarket}
+            targetPurpose={targetPurpose}
+            onTargetPurposeChange={setTargetPurpose}
+            gridCols={gridCols}
+            onGridColsChange={setGridCols}
+            gridRows={gridRows}
+            onGridRowsChange={setGridRows}
+            lifestyleEnabled={lifestyleEnabled}
+            onLifestyleChange={setLifestyleEnabled}
+            videoEnabled={videoEnabled}
+            onVideoChange={setVideoEnabled}
+            spinEnabled={spinEnabled}
+            onSpinChange={setSpinEnabled}
+            cropsEnabled={cropsEnabled}
+            onCropsChange={setCropsEnabled}
+            customColors={customColors}
+            onCustomColorsChange={setCustomColors}
+            promptText={promptText}
+            onPromptChange={setPromptText}
+            selectedProviderId={selectedProviderId}
+            onSelectProvider={setSelectedProviderId}
+            providers={providers}
+          />
+        );
       case 'generate':
-        return <GeneratePanel jobs={jobs} selectedJob={selectedJob} onSelectJob={setSelectedJob} promptText={promptText} onPromptChange={setPromptText} providers={providers} selectedProviderId={selectedProviderId} onSelectProvider={setSelectedProviderId} loading={loading} onStartGeneration={handleStartGeneration} />;
+        return (
+          <GeneratePanel
+            jobs={jobs}
+            selectedJob={selectedJob}
+            onSelectJob={setSelectedJob}
+            promptText={promptText}
+            onPromptChange={setPromptText}
+            providers={providers}
+            selectedProviderId={selectedProviderId}
+            onSelectProvider={setSelectedProviderId}
+            loading={loading}
+            onStartGeneration={handleStartGeneration}
+            onNavigate={setActiveTab}
+          />
+        );
       case 'review':
-        return <ReviewQA jobs={jobs} selectedJob={selectedJob} onSelectJob={setSelectedJob} onQAReview={handleQAReview} />;
+        return <ReviewQA jobs={jobs} selectedJob={selectedJob} onSelectJob={setSelectedJob} onQAReview={handleQAReview} onNavigate={setActiveTab} />;
       case 'deliver':
         return <DeliverExport jobs={jobs} selectedJob={selectedJob} onSelectJob={setSelectedJob} exportUrl={exportUrl} onExportUrl={handleExportUrl} />;
       case 'history':
         return <JobHistory jobs={jobs} onRefresh={fetchJobs} onSelectJob={setSelectedJob} />;
+      case 'profile':
+        return (
+          <ProfileSettings
+            userName={userName}
+            userEmail={session?.user?.email || ''}
+            userInitials={userInitials}
+            nightMode={nightMode}
+            onToggleNight={() => setNightMode(!nightMode)}
+            onSignOut={() => signOut()}
+            onProvidersUpdated={fetchProviders}
+            onProfileUpdated={(newName) => update({ name: newName })}
+          />
+        );
     }
   };
 
@@ -220,10 +405,9 @@ export default function Home() {
         onTabChange={setActiveTab}
         nightMode={nightMode}
         onToggleNight={() => setNightMode(!nightMode)}
-        onProfileClick={() => signOut()}
+        onProfileClick={() => setActiveTab('profile')}
         userInitials={userInitials}
       />
-      <WorkflowTabs activeTab={activeTab} onTabChange={setActiveTab} />
       <div className="main">{renderTab()}</div>
     </>
   );

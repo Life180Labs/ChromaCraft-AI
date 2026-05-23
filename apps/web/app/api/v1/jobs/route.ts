@@ -10,7 +10,11 @@ export async function GET(request: Request) {
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const jobs = await prisma.job.findMany({
     where: { userId: Number(userId) },
-    include: { assets: true }
+    include: {
+      assets: true,
+      generation: true,
+      prompt: true,
+    }
   });
   return NextResponse.json(jobs);
 }

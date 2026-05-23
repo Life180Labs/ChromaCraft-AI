@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "npm run dev:web",
     "dev:web": "npm --workspace apps/web run dev",
-    "dev:worker": "npm --workspace apps/worker run dev",
+    "dev:worker": "npm --workspace apps/worker run start",
     "prisma:migrate": "npm --workspace packages/db run prisma:migrate",
     "prisma:generate": "npm --workspace packages/db run prisma:generate"
   }

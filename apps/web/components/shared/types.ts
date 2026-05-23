@@ -1,4 +1,4 @@
-export type TabId = 'home' | 'setup' | 'generate' | 'review' | 'deliver' | 'history';
+export type TabId = 'home' | 'setup' | 'generate' | 'review' | 'deliver' | 'history' | 'profile';
 
 export type Job = {
   id: number;
@@ -7,6 +7,15 @@ export type Job = {
   createdAt: string;
   updatedAt: string;
   assets?: Asset[];
+  generation?: {
+    id: number;
+    metadata: any;
+  } | null;
+  prompt?: {
+    id: number;
+    name: string;
+    content: string;
+  } | null;
 };
 
 export type Asset = {
@@ -20,4 +29,5 @@ export type Provider = {
   id: number;
   name: string;
   default: boolean;
+  hasApiKey?: boolean;
 };
