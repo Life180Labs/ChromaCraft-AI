@@ -16,6 +16,11 @@ export type Job = {
     name: string;
     content: string;
   } | null;
+  // Add the provider property here:
+  provider?: {
+    id: number;
+    name: string;
+  } | null;
 };
 
 export type Asset = {
