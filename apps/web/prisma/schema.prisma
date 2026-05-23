@@ -30,6 +30,7 @@ model User {
   id            Int             @id @default(autoincrement())
   email         String          @unique
   passwordHash  String?
+  twoFactorEnabled Boolean @default(false)
   name          String?
   emailVerified DateTime?
   image         String?
