@@ -3,14 +3,14 @@
 import React from 'react';
 import { TbCheck, TbX, TbArrowRight } from 'react-icons/tb';
 import { Button } from '../ui/Button';
-import type { Job } from '../shared/types';
+import type { Job, TabId } from '../shared/types';
 
 type ReviewQAProps = {
   jobs: Job[];
   selectedJob: Job | null;
   onSelectJob: (job: Job) => void;
   onQAReview: (assetId: number, status: 'approved' | 'rejected') => void;
-  onNavigate?: (tab: string) => void;
+  onNavigate?: (tab: TabId) => void;
 };
 
 function assetLabel(path: string): string {
@@ -54,10 +54,10 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs, selectedJob, onSelectJ
               <div key={asset.id} className={`variant-cell ${asset.status === 'approved' ? 'done' : asset.status === 'rejected' ? 'error' : 'pending'}`}>
                 <div className="vc-body">
                   <div className="vc-car" style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 4px', overflow: 'hidden' }}>
-                    <img 
-                      src={`/api/v1/assets?id=${asset.id}`} 
-                      alt={assetLabel(asset.path)} 
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }} 
+                    <img
+                      src={`/api/v1/assets?id=${asset.id}`}
+                      alt={assetLabel(asset.path)}
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }}
                     />
                   </div>
                   <span className="vc-label" style={{ display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{assetLabel(asset.path)}</span>

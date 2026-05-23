@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { 
-  TbLoader, TbCheck, TbAlertCircle, TbPalette, TbClock, 
+import {
+  TbLoader, TbCheck, TbAlertCircle, TbPalette, TbClock,
   TbChevronRight, TbInfoCircle, TbReload, TbFileCode, TbX, TbPhoto
 } from 'react-icons/tb';
 import { Button } from '../ui/Button';
-import type { Job } from '../shared/types';
+import type { Job, TabId } from '../shared/types';
 
 type GeneratePanelProps = {
   jobs: Job[];
@@ -19,7 +19,7 @@ type GeneratePanelProps = {
   onSelectProvider: (id: number | null) => void;
   loading: boolean;
   onStartGeneration: () => void;
-  onNavigate?: (tab: string) => void;
+  onNavigate?: (tab: TabId) => void;
 };
 
 const COLOR_HEX: Record<string, string> = {
@@ -109,7 +109,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const assets = selectedJob?.assets || [];
   const variantAssets = assets.filter(a => a.type === 'variant' || a.type === 'processed');
   const finishedCount = variantAssets.filter(a => a.status === 'done' || a.status === 'approved').length;
-  
+
   // Silver auto-fail simulation to match prototype "failed color check" flow
   const failedVariantIndex = configuredColors.findIndex((c: string) => c.toLowerCase() === 'silver');
 
@@ -120,12 +120,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const triggerLifestyleSimulation = () => {
     setLifestyleSimStatus('generating');
     setActiveGenStep(1);
-    
+
     // Simulate card by card progress
     lifestyleCards.forEach((card, index) => {
       setTimeout(() => {
         setLifestyleCards(prev => prev.map((c, i) => i === index ? { ...c, status: 'generating' } : c));
-        
+
         setTimeout(() => {
           setLifestyleCards(prev => prev.map((c, i) => i === index ? { ...c, status: 'done' } : c));
         }, 1200);
@@ -213,9 +213,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
               const j = jobs.find((x) => x.id === Number(e.target.value));
               if (j) onSelectJob(j);
             }}
-            style={{ 
-              background: 'var(--bg)', border: '1px solid var(--bd)', 
-              borderRadius: '4px', padding: '4px 8px', fontSize: '12px', color: 'var(--tx)' 
+            style={{
+              background: 'var(--bg)', border: '1px solid var(--bd)',
+              borderRadius: '4px', padding: '4px 8px', fontSize: '12px', color: 'var(--tx)'
             }}
           >
             <option value="">-- Select Active Job --</option>
@@ -234,20 +234,19 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 
       {selectedJob ? (
         <div className="g3" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
-          
+
           {/* LEFT: Grid of variants & Progress details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            
+
             {/* Realtime progress tracker card */}
             <div className="sq" style={{ padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <div>
-                  <span 
-                    className={`badge ${
-                      selectedJob.status === 'PROCESSING' || selectedJob.status === 'PENDING'
-                        ? 'b-amber' 
+                  <span
+                    className={`badge ${selectedJob.status === 'PROCESSING' || selectedJob.status === 'PENDING'
+                        ? 'b-amber'
                         : 'b-green'
-                    }`}
+                      }`}
                   >
                     {selectedJob.status === 'PROCESSING' || selectedJob.status === 'PENDING'
                       ? `Generating (${finishedCount}/${totalVariants})`
@@ -273,22 +272,22 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             </div>
 
             {/* VARIANT GRID CONTAINER */}
-            <div 
-              id="variant-grid" 
-              style={{ 
-                display: 'grid', 
-                gridTemplateColumns: `repeat(${Math.min(gridCols, 4)}, 1fr)`, 
-                gap: '12px' 
+            <div
+              id="variant-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${Math.min(gridCols, 4)}, 1fr)`,
+                gap: '12px'
               }}
             >
               {configuredColors.map((colName, idx) => {
                 const colorHex = cellColors[idx] || COLOR_HEX[colName] || '#999';
                 const isFailed = failedVariantIndex === idx && selectedJob.status !== 'PROCESSING';
                 const isFinished = finishedCount > idx || selectedJob.status !== 'PROCESSING';
-                
+
                 return (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     className={`variant-cell ${isFailed ? 'error' : isFinished ? 'done' : 'pending'}`}
                     style={{ position: 'relative', overflow: 'hidden' }}
                   >
@@ -301,10 +300,10 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                         const showRealImage = isFinished && variantAsset && (variantAsset.status === 'done' || variantAsset.status === 'approved' || variantAsset.status === 'pending');
                         return showRealImage ? (
                           <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 4px', overflow: 'hidden' }}>
-                            <img 
-                              src={`/api/v1/assets?id=${variantAsset.id}`} 
-                              alt={colName} 
-                              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }} 
+                            <img
+                              src={`/api/v1/assets?id=${variantAsset.id}`}
+                              alt={colName}
+                              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }}
                             />
                           </div>
                         ) : (
@@ -318,8 +317,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                     </div>
 
                     {/* Palette picker trigger */}
-                    <button 
-                      className="vc-color-btn" 
+                    <button
+                      className="vc-color-btn"
                       onClick={(e) => handleOpenColorPicker(e, idx, colName, colorHex)}
                       title="Adjust Color Shade"
                     >
@@ -349,24 +348,23 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 
           {/* RIGHT: Pipeline add-ons and logs */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            
+
             {/* LIFESTYLE PIPELINE PREVIEWS */}
-            <div 
-              id="life-gen-card" 
+            <div
+              id="life-gen-card"
               className={`card ${!hasLifestyle ? 'muted dashed' : ''}`}
               style={{ padding: '16px' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <span className="step-name" style={{ fontSize: '13px', fontWeight: 600 }}>Lifestyle Integration</span>
                 {hasLifestyle ? (
-                  <span 
-                    className={`badge ${
-                      lifestyleSimStatus === 'generating' ? 'b-amber' : 
-                      lifestyleSimStatus === 'done' ? 'b-green' : 'b-gray'
-                    }`}
+                  <span
+                    className={`badge ${lifestyleSimStatus === 'generating' ? 'b-amber' :
+                        lifestyleSimStatus === 'done' ? 'b-green' : 'b-gray'
+                      }`}
                   >
-                    {lifestyleSimStatus === 'generating' ? 'Generating…' : 
-                     lifestyleSimStatus === 'done' ? 'Complete' : 'Waiting'
+                    {lifestyleSimStatus === 'generating' ? 'Generating…' :
+                      lifestyleSimStatus === 'done' ? 'Complete' : 'Waiting'
                     }
                   </span>
                 ) : (
@@ -390,8 +388,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                   {lifestyleSimStatus !== 'waiting' && (
                     <div className="lifestyle-preview-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                       {lifestyleCards.map(card => (
-                        <div 
-                          key={card.id} 
+                        <div
+                          key={card.id}
                           className={`lp-card ${card.status === 'done' ? 'done' : ''}`}
                           style={{ minHeight: '64px', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '6px' }}
                         >
@@ -414,11 +412,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--tx)' }}>Generation Pipeline Logs</span>
               </div>
 
-              <div 
-                className="gen-log" 
-                style={{ 
-                  flex: 1, maxHeight: '160px', overflowY: 'auto', background: 'var(--bg2)', 
-                  padding: '8px', borderRadius: '4px', fontSize: '9px', lineHeight: 1.5 
+              <div
+                className="gen-log"
+                style={{
+                  flex: 1, maxHeight: '160px', overflowY: 'auto', background: 'var(--bg2)',
+                  padding: '8px', borderRadius: '4px', fontSize: '9px', lineHeight: 1.5
                 }}
               >
                 [06:21:40] init: Starting engine pipeline context<br />
@@ -431,12 +429,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                     <div key={c}>
                       {done ? (
                         failed ? (
-                          <span style={{ color: 'var(--err)' }}>[06:21:4{5+i}] variant: {c} finish failed (Color mismatch)</span>
+                          <span style={{ color: 'var(--err)' }}>[06:21:4{5 + i}] variant: {c} finish failed (Color mismatch)</span>
                         ) : (
-                          <span style={{ color: 'var(--suc)' }}>[06:21:4{5+i}] variant: {c} color rendered</span>
+                          <span style={{ color: 'var(--suc)' }}>[06:21:4{5 + i}] variant: {c} color rendered</span>
                         )
                       ) : (
-                        <span>[06:21:4{5+i}] variant: {c} in queue</span>
+                        <span>[06:21:4{5 + i}] variant: {c} in queue</span>
                       )}
                     </div>
                   );
@@ -477,7 +475,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
               const hex = COLOR_HEX[name];
               const isAct = name === activeCellName;
               return (
-                <div 
+                <div
                   key={name}
                   className={`ccp-swatch ${isAct ? 'active' : ''}`}
                   style={{ background: hex, border: isAct ? '2px solid var(--tx)' : '1px solid var(--bd)' }}
@@ -497,7 +495,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             {(SHADES[activeCellName] || []).map(shadeHex => {
               const isSel = shadeHex.toLowerCase() === activeCellHex.toLowerCase();
               return (
-                <div 
+                <div
                   key={shadeHex}
                   className={`shade-sub-sw ${isSel ? 'active' : ''}`}
                   style={{ background: shadeHex, border: isSel ? '2px solid var(--acc)' : '1px solid var(--bd)' }}
@@ -511,12 +509,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
           <div className="field">
             <label style={{ fontSize: '11px' }}>Custom Finishes Hex</label>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <input 
+              <input
                 id="ccp-custom-color"
                 type="text"
                 value={activeCellHex}
                 onChange={(e) => setActiveCellHex(e.target.value)}
-                style={{ 
+                style={{
                   flex: 1, padding: '6px 10px', fontSize: '12px', background: 'var(--bg2)',
                   border: '1px solid var(--bd)', borderRadius: '4px', color: 'var(--tx)', outline: 'none'
                 }}
@@ -555,12 +553,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             ].map(opt => {
               const isSel = fixOption === opt.id;
               return (
-                <div 
+                <div
                   key={opt.id}
                   className={`sq-opt ${isSel ? 'sel' : ''}`}
-                  style={{ 
-                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', 
-                    padding: '10px 14px', borderRadius: '6px', border: isSel ? '2px solid var(--err)' : '1px solid var(--bd)' 
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                    padding: '10px 14px', borderRadius: '6px', border: isSel ? '2px solid var(--err)' : '1px solid var(--bd)'
                   }}
                   onClick={() => setFixOption(opt.id)}
                 >
@@ -575,8 +573,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             <Button variant="outline" onClick={() => setShowFixModal(false)} disabled={reprocessing}>
               Cancel
             </Button>
-            <Button 
-              variant="primary" 
+            <Button
+              variant="primary"
               onClick={handleRunFix}
               disabled={reprocessing}
               style={{ background: 'var(--err)', borderColor: 'var(--err)', color: '#fff' }}
