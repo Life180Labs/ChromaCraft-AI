@@ -1,5 +1,7 @@
 import { getServerSession } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import GoogleProvider from 'next-auth/providers/google';
+import AzureADProvider from 'next-auth/providers/azure-ad';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import prisma from './prisma';
 import bcrypt from 'bcrypt';
@@ -21,11 +23,20 @@ export const authOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
         const user = await prisma.user.findUnique({ where: { email: credentials.email } });
-        if (!user) return null;
+        if (!user || !user.passwordHash) return null;
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
         if (!isValid) return null;
         return { id: String(user.id), email: user.email, name: user.name };
       },
+    }),
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID || 'mock-google-client-id',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'mock-google-client-secret',
+    }),
+    AzureADProvider({
+      clientId: process.env.MICROSOFT_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID || 'mock-microsoft-client-id',
+      clientSecret: process.env.MICROSOFT_CLIENT_SECRET || process.env.AZURE_AD_CLIENT_SECRET || 'mock-microsoft-client-secret',
+      tenantId: process.env.AZURE_AD_TENANT_ID || 'common',
     }),
   ],
   callbacks: {
