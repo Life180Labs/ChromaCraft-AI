@@ -1,9 +1,9 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 # Install Python, openssl & system dependencies
-RUN apk add --no-cache openssl python3 py3-pip make g++ python3-dev libpng-dev jpeg-dev zlib-dev
-
-# Set up virtual environment and install python dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl python3 python3-pip python3-venv make g++ libpng-dev libjpeg-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY python/requirements.txt ./python/
 RUN python3 -m venv /opt/venv
@@ -16,6 +16,7 @@ RUN npm install --legacy-peer-deps
 
 # Copy application files
 COPY worker.ts ./
+COPY orchestrator.ts ./
 COPY python/ ./python/
 
 # Generate Prisma Client
