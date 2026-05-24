@@ -7,7 +7,7 @@ import pino from 'pino';
 import dotenv from 'dotenv';
 import { AgentController, GenerationParams, VariantResult } from './orchestrator';
 
-const __dirname = process.cwd();
+// Removed explicit __dirname declaration since CJS provides it automatically.
 
 let envPath = path.resolve(process.cwd(), '.env');
 if (!fs.existsSync(envPath)) {
@@ -341,8 +341,17 @@ const processingWorker = new Worker(
 );
 
 // ---------------------------------------------------------------------------
-// Graceful shutdown
+// Graceful shutdown & logging
 // ---------------------------------------------------------------------------
+
+[uploadWorker, generateWorker, processingWorker].forEach(worker => {
+  worker.on('error', err => {
+    logger.error({ err: err.message }, 'BullMQ Worker Error');
+  });
+  worker.on('failed', (job, err) => {
+    logger.error({ jobId: job?.id, err: err.message }, 'Job failed');
+  });
+});
 
 process.on('SIGTERM', async () => {
   logger.info('Shutting down workers...');
@@ -353,3 +362,8 @@ process.on('SIGTERM', async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
+
+logger.info('Workers initialized successfully. Listening for jobs...');
+
+// Keep event loop alive if BullMQ connection fails silently
+setInterval(() => {}, 1000 * 60 * 60);
