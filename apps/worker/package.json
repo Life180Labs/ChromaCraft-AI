@@ -2,9 +2,10 @@
   "name": "chromacraft-worker",
   "version": "0.1.0",
   "private": true,
+  "type": "commonjs",
   "scripts": {
-    "start": "ts-node worker.ts",
-    "build": "tsc",
+    "start": "ts-node --project tsconfig.json worker.ts",
+    "build": "tsc --project tsconfig.json",
     "e2e:python": "python python/e2e_smoke.py"
   },
   "dependencies": {
@@ -19,5 +20,13 @@
     "prisma": "^5.18.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
+  },
+  "ts-node": {
+    "esm": false,
+    "transpileOnly": true,
+    "compilerOptions": {
+      "module": "CommonJS",
+      "moduleResolution": "node"
+    }
   }
 }

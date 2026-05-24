@@ -16,6 +16,13 @@ enum JobStatus {
   FAILED
 }
 
+enum IterationStatus {
+  RUNNING
+  PASSED
+  FAILED
+  RETRYING
+}
+
 enum JobType {
   CATALOG_VARIANTS
   LIFESTYLE_SCENES
@@ -44,20 +51,23 @@ model User {
 }
 
 model Job {
-  id          Int        @id @default(autoincrement())
-  name        String
-  jobType     JobType    @default(CATALOG_VARIANTS)
-  status      JobStatus  @default(PENDING)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  userId      Int
-  user        User       @relation(fields: [userId], references: [id])
-  assets      Asset[]
-  promptId    Int?       @unique
-  prompt      PromptTemplate? @relation(fields: [promptId], references: [id])
-  generation  Generation?
-  providerId  Int?
-  provider    AiProvider? @relation(fields: [providerId], references: [id])
+  id             Int               @id @default(autoincrement())
+  name           String
+  jobType        JobType           @default(CATALOG_VARIANTS)
+  status         JobStatus         @default(PENDING)
+  currentGoal    String?
+  statusHistory  Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  userId         Int
+  user           User              @relation(fields: [userId], references: [id])
+  assets         Asset[]
+  iterations     Iteration[]
+  promptId       Int?              @unique
+  prompt         PromptTemplate?   @relation(fields: [promptId], references: [id])
+  generation     Generation?
+  providerId     Int?
+  provider       AiProvider?       @relation(fields: [providerId], references: [id])
 }
 
 model Asset {
@@ -81,6 +91,17 @@ model Generation {
   metadata Json?
   jobId    Int      @unique
   job      Job      @relation(fields: [jobId], references: [id])
+}
+
+model Iteration {
+  id         Int             @id @default(autoincrement())
+  jobId      Int
+  job        Job             @relation(fields: [jobId], references: [id])
+  prompt     String
+  critique   String?
+  status     IterationStatus @default(RUNNING)
+  assetPath  String?
+  createdAt  DateTime        @default(now())
 }
 
 model PasswordReset {
