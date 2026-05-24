@@ -5,9 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import dotenv from 'dotenv';
-import { AgentController, GenerationParams, VariantResult } from './orchestrator';
-
-// Removed explicit __dirname declaration since CJS provides it automatically.
+import { AgentController, GenerationParams, GenerationSettings, VariantResult } from './orchestrator';
 
 let envPath = path.resolve(process.cwd(), '.env');
 if (!fs.existsSync(envPath)) {
@@ -24,29 +22,21 @@ const prisma = new PrismaClient();
 
 let redisHost = process.env.REDIS_HOST || 'localhost';
 let redisPort = Number(process.env.REDIS_PORT) || 6379;
-let redisPassword = process.env.REDIS_PASSWORD || undefined;
+let redisPassword: string | undefined = process.env.REDIS_PASSWORD;
 
 if (process.env.REDIS_URL) {
   try {
     const parsed = new URL(process.env.REDIS_URL);
     redisHost = parsed.hostname;
     redisPort = Number(parsed.port) || 6379;
-    if (parsed.password) {
-      redisPassword = parsed.password;
-    }
-  } catch (e) {
-    console.warn('Failed to parse REDIS_URL, using defaults');
-  }
+    if (parsed.password) redisPassword = decodeURIComponent(parsed.password);
+  } catch { /* use defaults */ }
 }
 
-const redisConfig = {
-  host: redisHost,
-  port: redisPort,
-  password: redisPassword,
-};
+const redisConfig = { host: redisHost, port: redisPort, password: redisPassword };
 
 // ---------------------------------------------------------------------------
-// Standard UC1 colors
+// Standard UC1 colors (fallback when none configured)
 // ---------------------------------------------------------------------------
 
 export const UC1_STANDARD_COLORS = [
@@ -63,10 +53,7 @@ interface GenerateJobData {
   prompt: string;
   provider: string;
   apiKey: string;
-  settings?: {
-    prefix?: string;
-    colors?: string[];
-  };
+  settings?: GenerationSettings & { prefix?: string; colors?: string[] };
 }
 
 interface ProcessingJobData {
@@ -74,99 +61,66 @@ interface ProcessingJobData {
   prefix: string;
 }
 
-interface PythonRunResult {
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-interface JobStoragePaths {
-  storageDir: string;
-  jobAssetDir: string;
-  processedDir: string;
-}
-
 // ---------------------------------------------------------------------------
-// BullMQ queue
+// Queues
 // ---------------------------------------------------------------------------
 
 const processingQueue = new Queue('processing', { connection: redisConfig as any });
 
 // ---------------------------------------------------------------------------
-// Utility functions
+// Utility helpers
 // ---------------------------------------------------------------------------
 
-function deriveFilenamePrefix(jobName: string, settings?: GenerateJobData['settings']): string {
+function derivePrefix(jobName: string, settings?: GenerateJobData['settings']): string {
   if (settings?.prefix?.trim()) {
-    return settings.prefix.trim().replace(/\s+/g, '_');
+    return settings.prefix.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_-]/g, '');
   }
   return jobName.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_-]/g, '');
 }
 
-function resolveJobStoragePaths(jobId: number): JobStoragePaths {
+function resolveStoragePaths(jobId: number) {
   const storageDir = process.env.STORAGE_PATH || path.join(__dirname, '..', '..', 'storage');
   const jobAssetDir = path.join(storageDir, 'assets', String(jobId));
   const processedDir = path.join(jobAssetDir, 'processed');
   return { storageDir, jobAssetDir, processedDir };
 }
 
-async function runPythonScript(scriptName: string, args: string[]): Promise<PythonRunResult> {
+async function runPythonScript(
+  scriptName: string,
+  args: string[],
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   const scriptPath = path.join(process.cwd(), 'python', scriptName);
-  logger.info({ scriptPath, args }, 'Spawning Python process');
-
-  const pythonProcess = spawn('python', [scriptPath, ...args]);
-  let stdout = '';
-  let stderr = '';
-
-  pythonProcess.stdout.on('data', (data: Buffer) => {
-    const chunk = data.toString();
-    stdout += chunk;
-    logger.debug({ scriptName, stream: 'stdout' }, chunk.trim());
-  });
-
-  pythonProcess.stderr.on('data', (data: Buffer) => {
-    const chunk = data.toString();
-    stderr += chunk;
-    logger.warn({ scriptName, stream: 'stderr' }, chunk.trim());
-  });
-
-  const exitCode = await new Promise<number | null>((resolve) => {
-    pythonProcess.on('close', resolve);
-  });
-
+  logger.info({ scriptPath, args: args.join(' ') }, 'Spawning Python');
+  const proc = spawn('python', [scriptPath, ...args]);
+  let stdout = '', stderr = '';
+  proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); logger.debug(d.toString().trim()); });
+  proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); logger.warn(d.toString().trim()); });
+  const exitCode = await new Promise<number | null>((resolve) => { proc.on('close', resolve); });
   return { exitCode, stdout, stderr };
 }
 
-async function markJobFailed(jobId: number, context: string, err: unknown): Promise<void> {
-  const message = err instanceof Error ? err.message : String(err);
-  logger.error({ jobId, context, err: message }, 'Job failed');
-  await prisma.job.update({
-    where: { id: jobId },
-    data: { status: 'FAILED' },
-  });
+async function markJobFailed(jobId: number, context: string, err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  logger.error({ jobId, context, err: msg }, 'Marking job FAILED');
+  await prisma.job.update({ where: { id: jobId }, data: { status: 'FAILED' } });
 }
 
-// ---------------------------------------------------------------------------
-// Register assets produced by the ReAct loop into the database
-// ---------------------------------------------------------------------------
-
-async function registerVariantAssets(
-  jobId: number,
-  results: VariantResult[],
-): Promise<void> {
-  for (const result of results) {
-    if (!result.assetPath || !fs.existsSync(result.assetPath)) {
-      continue;
+async function registerVariantAssets(jobId: number, results: VariantResult[]) {
+  for (const r of results) {
+    if (!r.assetPath) continue;
+    try {
+      const exists = fs.existsSync(r.assetPath);
+      await prisma.asset.create({
+        data: {
+          jobId,
+          type: 'variant',
+          path: r.assetPath,
+          status: exists ? (r.passed ? 'done' : 'error') : 'error',
+        },
+      });
+    } catch (e: any) {
+      logger.warn({ jobId, path: r.assetPath, err: e.message }, 'Could not register variant asset');
     }
-    await prisma.asset.create({
-      data: {
-        jobId,
-        type: 'variant',
-        path: result.assetPath,
-        // Mark as 'done' if the judge passed; 'error' if all retries were exhausted.
-        status: result.passed ? 'done' : 'error',
-      },
-    });
   }
 }
 
@@ -174,119 +128,120 @@ async function registerVariantAssets(
 // Workers
 // ---------------------------------------------------------------------------
 
-logger.info('Initializing workers...');
-
-// 1. Upload Worker — unchanged; marks upload asset done and awaits generate trigger
+// 1. Upload worker — mark the original asset as done
 const uploadWorker = new Worker(
   'upload',
   async (job: BullJob) => {
     const { jobId, assetId } = job.data;
-    logger.info({ jobId }, 'Processing upload');
-
+    logger.info({ jobId }, 'Upload worker: processing');
     if (assetId) {
-      await prisma.asset.update({
-        where: { id: assetId },
-        data: { status: 'done' },
-      });
-    }
-
-    const dbJob = await prisma.job.findUnique({
-      where: { id: jobId },
-      include: { prompt: true },
-    });
-
-    if (dbJob?.prompt) {
-      logger.info({ jobId }, 'Prompt pre-defined; awaiting generate API trigger');
+      await prisma.asset.update({ where: { id: assetId }, data: { status: 'done' } });
     }
   },
   { connection: redisConfig as any },
 );
 
-// 2. Generate Worker — drives the AgentController ReAct loop
+// 2. Generate worker — drives AgentController ReAct loop
 const generateWorker = new Worker(
   'generate',
   async (job: BullJob<GenerateJobData>) => {
     const { jobId, prompt, provider, apiKey, settings } = job.data;
-    logger.info({ jobId, provider }, 'Starting ReAct generation loop');
+    logger.info({ jobId, provider, settings }, 'Generate worker: starting');
 
     try {
       const dbJob = await prisma.job.findUnique({
         where: { id: jobId },
         include: { assets: true },
       });
-      if (!dbJob) {
-        throw new Error(`Job ${jobId} not found`);
-      }
+      if (!dbJob) throw new Error(`Job ${jobId} not found in database`);
 
-      await prisma.job.update({
-        where: { id: jobId },
-        data: { status: 'PROCESSING' },
-      });
+      await prisma.job.update({ where: { id: jobId }, data: { status: 'PROCESSING' } });
 
-      const { jobAssetDir } = resolveJobStoragePaths(jobId);
+      const { jobAssetDir } = resolveStoragePaths(jobId);
       fs.mkdirSync(jobAssetDir, { recursive: true });
 
-      const colors: string[] =
-        settings?.colors?.length ? settings.colors : [...UC1_STANDARD_COLORS];
-      const prefix = deriveFilenamePrefix(dbJob.name, settings);
+      // ── Resolve colors ──
+      // Priority: settings.colors from frontend → UC1 defaults
+      let colors: string[] = (settings?.colors && settings.colors.length > 0)
+        ? settings.colors
+        : [...UC1_STANDARD_COLORS];
 
+      // Respect grid dimensions: if cols×rows < colors.length, truncate
+      const gridSize = (settings?.cols ?? 4) * (settings?.rows ?? 3);
+      if (colors.length > gridSize) {
+        colors = colors.slice(0, gridSize);
+      }
+
+      const prefix = derivePrefix(dbJob.name, settings);
       const refAsset = dbJob.assets.find((a) => a.type === 'original');
-      const refImagePath = refAsset?.path ?? undefined;
+      const refImagePath = refAsset?.path;
 
-      // Goal construction: drives the judge's evaluation criteria
-      const goal = `Generate a photorealistic product catalog image with the correct paint color.
-The image must clearly display the vehicle in the specified color with studio lighting and a clean background.
-Job: ${dbJob.name} | Prefix: ${prefix}`;
+      // Build image size from grid (target 800×600 per image)
+      const imageSize = settings?.imageSize || '800x600';
 
-      const generationParams: GenerationParams = {
+      // Goal string drives the judge's evaluation
+      const goal = [
+        `Generate a photorealistic product catalog image with the correct paint color.`,
+        `The image must clearly show the product in the specified color with professional studio lighting.`,
+        `Clean, pure white background. High quality catalog aesthetic.`,
+        `Job: "${dbJob.name}" | Prefix: ${prefix} | Industry: ${settings?.industry || 'General'}.`,
+        settings?.targetMarket ? `Target market: ${settings.targetMarket}.` : '',
+        settings?.targetAudience ? `Target audience: ${settings.targetAudience}.` : '',
+      ].filter(Boolean).join(' ');
+
+      const genParams: GenerationParams = {
         provider,
         apiKey: apiKey || 'none',
         outDir: jobAssetDir,
         refImagePath,
+        settings: {
+          ...settings,
+          prefix,
+          imageSize,
+          spinFrames: settings?.spinFrames || 36,
+          fps: settings?.fps || 12,
+        },
       };
 
-      // Run the ReAct loop via AgentController
-      const controller = new AgentController(prisma);
-      const results = await controller.run(jobId, goal, generationParams, colors, prompt);
+      logger.info(
+        { jobId, colors: colors.length, prefix, provider, spin: settings?.spinEnabled, video: settings?.videoEnabled },
+        'Starting AgentController',
+      );
 
-      // Register all produced files as Asset records
+      const controller = new AgentController(prisma);
+      const results = await controller.run(jobId, goal, genParams, colors, prompt);
+
       await registerVariantAssets(jobId, results);
 
-      const producedCount = results.filter((r) => r.assetPath).length;
-      if (producedCount === 0) {
-        throw new Error('ReAct loop completed but no asset files were produced');
-      }
+      const produced = results.filter((r) => r.assetPath).length;
+      if (produced === 0) throw new Error('ReAct loop produced no asset files');
 
-      // Enqueue post-processing (rembg, resize, catalog naming)
+      // Enqueue post-processing
       await processingQueue.add('process-catalog-variants', {
         jobId,
         prefix,
       } satisfies ProcessingJobData);
 
-      const passedCount = results.filter((r) => r.passed).length;
-      logger.info(
-        { jobId, prefix, producedCount, passedCount, totalColors: colors.length },
-        'ReAct generation complete; enqueued post-processing',
-      );
-
-      return { success: true, producedCount, passedCount };
+      const passed = results.filter((r) => r.passed).length;
+      logger.info({ jobId, produced, passed, total: colors.length }, 'Generation complete; enqueued processing');
+      return { success: true, produced, passed };
     } catch (err) {
       await markJobFailed(jobId, 'generateWorker', err);
       throw err;
     }
   },
-  { connection: redisConfig as any },
+  { connection: redisConfig as any, concurrency: 2 },
 );
 
-// 3. Processing Worker — rembg, resize, rename; sets QA_PENDING on success
+// 3. Processing worker — rembg, resize, catalog naming → QA_PENDING
 const processingWorker = new Worker(
   'processing',
   async (job: BullJob<ProcessingJobData>) => {
     const { jobId, prefix } = job.data;
-    logger.info({ jobId, prefix }, 'Starting post-processing');
+    logger.info({ jobId, prefix }, 'Processing worker: starting');
 
     try {
-      const { jobAssetDir, processedDir } = resolveJobStoragePaths(jobId);
+      const { jobAssetDir, processedDir } = resolveStoragePaths(jobId);
       fs.mkdirSync(processedDir, { recursive: true });
 
       const { exitCode, stderr } = await runPythonScript('process.py', [
@@ -296,42 +251,30 @@ const processingWorker = new Worker(
       ]);
 
       if (exitCode !== 0) {
-        throw new Error(`Python processing script failed (exit ${exitCode}): ${stderr}`);
+        throw new Error(`process.py failed (exit ${exitCode}): ${stderr}`);
       }
 
-      logger.info({ jobId }, 'Python processing completed; registering processed assets');
+      logger.info({ jobId }, 'Python processing done; registering processed assets');
 
       const files = fs.readdirSync(processedDir);
-      const createdAssets = [];
+      const created: any[] = [];
 
       for (const file of files) {
-        if (!file.startsWith(`${prefix}_`) || !file.endsWith('.png')) {
-          continue;
-        }
+        if (!file.endsWith('.png')) continue;
         const filePath = path.join(processedDir, file);
         const asset = await prisma.asset.create({
-          data: {
-            jobId,
-            type: 'processed',
-            path: filePath,
-            status: 'pending',
-          },
+          data: { jobId, type: 'processed', path: filePath, status: 'pending' },
         });
-        createdAssets.push(asset);
+        created.push(asset);
       }
 
-      if (createdAssets.length === 0) {
-        throw new Error('Processing completed but no catalog PNG files were produced');
+      if (created.length === 0) {
+        throw new Error('process.py completed but no catalog PNGs produced');
       }
 
-      await prisma.job.update({
-        where: { id: jobId },
-        data: { status: 'QA_PENDING' },
-      });
-
-      logger.info({ jobId, assetCount: createdAssets.length }, 'Job ready for QA review');
-
-      return { success: true, assets: createdAssets };
+      await prisma.job.update({ where: { id: jobId }, data: { status: 'QA_PENDING' } });
+      logger.info({ jobId, assetCount: created.length }, 'Job ready for QA');
+      return { success: true, assets: created.length };
     } catch (err) {
       await markJobFailed(jobId, 'processingWorker', err);
       throw err;
@@ -341,29 +284,22 @@ const processingWorker = new Worker(
 );
 
 // ---------------------------------------------------------------------------
-// Graceful shutdown & logging
+// Graceful shutdown
 // ---------------------------------------------------------------------------
 
-[uploadWorker, generateWorker, processingWorker].forEach(worker => {
-  worker.on('error', err => {
-    logger.error({ err: err.message }, 'BullMQ Worker Error');
-  });
-  worker.on('failed', (job, err) => {
-    logger.error({ jobId: job?.id, err: err.message }, 'Job failed');
-  });
+[uploadWorker, generateWorker, processingWorker].forEach((w) => {
+  w.on('error', (err) => logger.error({ err: err.message }, 'Worker error'));
+  w.on('failed', (job, err) => logger.error({ jobId: job?.id, err: err.message }, 'Job failed'));
+  w.on('completed', (job) => logger.info({ jobId: job?.id }, 'Job completed'));
 });
 
 process.on('SIGTERM', async () => {
   logger.info('Shutting down workers...');
-  await uploadWorker.close();
-  await generateWorker.close();
-  await processingWorker.close();
+  await Promise.all([uploadWorker.close(), generateWorker.close(), processingWorker.close()]);
   await processingQueue.close();
   await prisma.$disconnect();
   process.exit(0);
 });
 
-logger.info('Workers initialized successfully. Listening for jobs...');
-
-// Keep event loop alive if BullMQ connection fails silently
-setInterval(() => {}, 1000 * 60 * 60);
+logger.info('Workers initialised. Listening for jobs...');
+setInterval(() => {}, 1_000 * 60 * 60);

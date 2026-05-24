@@ -2,49 +2,47 @@
 """
 ChromaCraft Image Generation Tool — JSON-mode entry point.
 
-Usage (legacy, backwards-compatible):
-    python generate.py --jobId 1 --prompt "..." --provider mock \
-        --apiKey none --outDir /tmp/out --colors "White,Black"
+Supports:
+  - task generate  : Multi-color catalog variant generation (mock / OpenAI / Stability / Groq)
+  - task recolor   : Recolor an uploaded reference image to target colors (color transfer)
+  - task spin360   : Generate 360° turntable frames from a reference image
+  - task video     : Stitch 360° frames into an animated GIF / MP4 with ffmpeg
+  - task composite : Alpha-composite foreground over background
+  - task rotate    : Rotate an image by N degrees
 
-Usage (ReAct / JSON-mode, used by AgentController):
-    python generate.py --task generate --jobId 1 --prompt "..." \
-        --provider mock --apiKey none --outDir /tmp/out \
-        --colors "White" --jsonMode [--refImage /path/to/ref.png]
+Exit codes: 0 = success, 1 = error
 
-    python generate.py --task rotate --inputPath /path/to/img.png \
-        --degrees 90 --outputPath /path/to/out.png --jsonMode
-
-    python generate.py --task composite --foreground /path/a.png \
-        --background /path/b.png --outputPath /path/out.png --jsonMode
-
-Exit codes:
-    0 — success
-    1 — error
-
-In --jsonMode the LAST line of stdout is always a JSON object:
+JSON-mode (--jsonMode):
+    Each color / task emits one JSON line to stdout:
     {"status": "success", "path": "...", "metadata": "..."}
     {"status": "error",   "reason": "..."}
 """
 
+from __future__ import annotations
+
 import argparse
 import base64
+import colorsys
 import json
+import math
 import os
 import re
+import subprocess
 import sys
+import tempfile
+from io import BytesIO
+from pathlib import Path
 from typing import Optional
 
 import requests
-from PIL import Image, ImageChops, ImageDraw
-
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
 # ---------------------------------------------------------------------------
-# Color helpers
+# Slug / filename helpers
 # ---------------------------------------------------------------------------
 
 def color_to_slug(color: str) -> str:
-    slug = color.strip().replace(" ", "_")
-    return re.sub(r"[^A-Za-z0-9_]", "", slug)
+    return re.sub(r"[^A-Za-z0-9_]", "", color.strip().replace(" ", "_"))
 
 
 def parse_colors(colors_arg: str) -> list[str]:
@@ -55,363 +53,924 @@ def raw_filename(color: str) -> str:
     return f"raw_{color_to_slug(color)}.png"
 
 
-def get_color_rgb(color_name: str) -> tuple[int, int, int]:
-    color_map = {
-        "white": (245, 245, 245),
-        "black": (20, 20, 20),
-        "blue": (30, 90, 220),
-        "red": (220, 25, 25),
-        "green": (25, 160, 45),
-        "brown": (110, 70, 35),
-        "silver": (180, 180, 180),
-        "yellow": (240, 210, 15),
-        "cream": (240, 230, 205),
-        "pink": (245, 160, 185),
-        "dark_blue": (10, 25, 100),
-        "orange": (245, 125, 5),
-        "purple": (128, 0, 128),
-        "gold": (255, 215, 0),
-        "teal": (0, 128, 128),
-        "lime": (0, 255, 0),
-        "cyan": (0, 255, 255),
-        "magenta": (255, 0, 255),
-        "navy": (0, 0, 128),
-        "maroon": (128, 0, 0),
-        "olive": (128, 128, 0),
-        "gray": (128, 128, 128),
-        "grey": (128, 128, 128),
-        "charcoal": (54, 69, 79),
-        "bronze": (205, 127, 50),
-        "beige": (245, 245, 220),
-    }
-    name_clean = color_name.lower().strip().replace(" ", "_")
+# ---------------------------------------------------------------------------
+# Color name → RGB
+# ---------------------------------------------------------------------------
 
-    hex_str = name_clean.lstrip("#")
-    if len(hex_str) == 6 and all(c in "0123456789abcdef" for c in hex_str):
+COLOR_MAP: dict[str, tuple[int, int, int]] = {
+    "white": (245, 245, 245),
+    "black": (20, 20, 20),
+    "blue": (30, 90, 220),
+    "red": (210, 25, 25),
+    "green": (25, 150, 45),
+    "brown": (110, 70, 35),
+    "silver": (192, 192, 192),
+    "yellow": (240, 210, 15),
+    "cream": (240, 230, 205),
+    "pink": (240, 105, 160),
+    "dark_blue": (10, 25, 110),
+    "orange": (240, 120, 5),
+    "purple": (130, 0, 130),
+    "gold": (218, 165, 32),
+    "teal": (0, 130, 128),
+    "navy": (0, 0, 128),
+    "maroon": (128, 0, 0),
+    "gray": (130, 130, 130),
+    "grey": (130, 130, 130),
+    "charcoal": (54, 69, 79),
+    "bronze": (205, 127, 50),
+    "beige": (245, 245, 220),
+    "lime": (50, 205, 50),
+    "cyan": (0, 200, 210),
+}
+
+
+def name_to_rgb(color_name: str) -> tuple[int, int, int]:
+    key = color_to_slug(color_name).lower()
+    if key in COLOR_MAP:
+        return COLOR_MAP[key]
+    # Hex fallback
+    hex_str = key.lstrip("#")
+    if len(hex_str) == 6:
         try:
             return (int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16))
         except ValueError:
             pass
-    if len(hex_str) == 3 and all(c in "0123456789abcdef" for c in hex_str):
+    if len(hex_str) == 3:
         try:
             return (int(hex_str[0] * 2, 16), int(hex_str[1] * 2, 16), int(hex_str[2] * 2, 16))
         except ValueError:
             pass
+    return (128, 128, 128)
 
-    return color_map.get(name_clean, (128, 128, 128))
+
+def rgb_to_hsl(r: int, g: int, b: int) -> tuple[float, float, float]:
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    return h, s, l
 
 
-# ---------------------------------------------------------------------------
-# Drawing helpers
-# ---------------------------------------------------------------------------
-
-def draw_car_silhouette(draw: ImageDraw.ImageDraw, color_rgb: tuple[int, int, int], width: int, height: int) -> None:
-    cx = width // 2
-    cy = height // 2 + 30
-    wheel_y = cy + 40
-    wheel_r = 35
-    draw.line([(50, wheel_y + wheel_r), (width - 50, wheel_y + wheel_r)], fill=(100, 100, 100), width=4)
-    wheel1_x = cx - 150
-    wheel2_x = cx + 150
-    draw.ellipse([cx - 250, wheel_y + wheel_r - 8, cx + 250, wheel_y + wheel_r + 4], fill=(30, 30, 30))
-    body_points = [
-        (cx - 240, cy + 20), (cx - 180, cy - 20), (cx - 100, cy - 60),
-        (cx + 80, cy - 60), (cx + 160, cy - 10), (cx + 220, cy + 10),
-        (cx + 230, cy + 40), (cx - 240, cy + 40),
-    ]
-    draw.polygon(body_points, fill=color_rgb, outline=(255, 255, 255), width=2)
-    cabin_points = [
-        (cx - 160, cy - 15), (cx - 95, cy - 52), (cx + 70, cy - 52),
-        (cx + 140, cy - 10), (cx - 160, cy - 15),
-    ]
-    draw.polygon(cabin_points, fill=(40, 40, 50), outline=(255, 255, 255), width=2)
-    draw.line([(cx - 10, cy - 52), (cx - 10, cy - 12)], fill=(255, 255, 255), width=2)
-    draw.polygon([(cx - 240, cy + 20), (cx - 220, cy + 20), (cx - 225, cy + 30), (cx - 240, cy + 30)], fill=(255, 235, 100))
-    draw.polygon([(cx + 220, cy + 10), (cx + 230, cy + 15), (cx + 230, cy + 25), (cx + 215, cy + 20)], fill=(255, 50, 50))
-    for wx in [wheel1_x, wheel2_x]:
-        draw.ellipse([wx - wheel_r, wheel_y - wheel_r, wx + wheel_r, wheel_y + wheel_r], fill=(30, 30, 30), outline=(80, 80, 80), width=3)
-        hub_r = 15
-        draw.ellipse([wx - hub_r, wheel_y - hub_r, wx + hub_r, wheel_y + hub_r], fill=(200, 200, 200), outline=(100, 100, 100), width=2)
+def hsl_to_rgb(h: float, s: float, l: float) -> tuple[int, int, int]:
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return (int(r * 255), int(g * 255), int(b * 255))
 
 
 # ---------------------------------------------------------------------------
-# Generation backends
+# ── CORE: Intelligent color recoloring from a reference image ──────────────
+#
+# Strategy:
+#   1. Isolate the "body" pixels of the product using rembg (remove background).
+#   2. Compute average HSL of non-background, non-black pixels → "source color".
+#   3. Map every body pixel: keep luminance/saturation structure, shift hue to
+#      target hue, scale saturation and luminance toward the target palette.
+#   4. Composite back onto a clean white studio background.
+#   5. Paste the original glass/chrome highlights back on top (high-L pixels).
 # ---------------------------------------------------------------------------
 
-def generate_mock_image(job_id: str, prompt: str, color: str, out_dir: str, provider_label: str = "MOCK AI") -> str:
-    width, height = 800, 800
-    color_rgb = get_color_rgb(color)
-    is_light = color.lower().strip() in ["white", "silver", "cream", "yellow", "pink"]
-    color1 = (60, 65, 75) if is_light else (240, 242, 245)
-    color2 = (30, 35, 45) if is_light else (190, 195, 200)
-    text_color = (255, 255, 255) if is_light else (30, 30, 30)
-    accent_color = (255, 200, 80) if is_light else (10, 25, 100)
+def _rembg_remove(img: Image.Image) -> Image.Image:
+    """Remove background using rembg if available, else return as RGBA."""
+    try:
+        from rembg import remove as rembg_remove
+        buf_in = BytesIO()
+        img.save(buf_in, format="PNG")
+        buf_out = BytesIO(rembg_remove(buf_in.getvalue()))
+        return Image.open(buf_out).convert("RGBA")
+    except Exception:
+        # Graceful fallback: just convert to RGBA
+        return img.convert("RGBA")
 
-    img = Image.new("RGB", (width, height), color=color1)
-    draw = ImageDraw.Draw(img)
-    for y in range(height):
-        r = int(color1[0] + (color2[0] - color1[0]) * (y / height))
-        g = int(color1[1] + (color2[1] - color1[1]) * (y / height))
-        b = int(color1[2] + (color2[2] - color1[2]) * (y / height))
-        for x in range(width):
-            draw.point((x, y), fill=(r, g, b))
 
-    draw_car_silhouette(draw, color_rgb, width, height)
+def recolor_reference(
+    ref_path: str,
+    target_color_name: str,
+    out_path: str,
+    bg_color: tuple[int, int, int] = (255, 255, 255),
+    image_size: tuple[int, int] = (800, 600),
+) -> str:
+    """
+    Recolor a reference product image to a target color using HSL hue-shifting.
+    The subject is separated from the background, recolored, then placed on a
+    clean studio background.
+    """
+    target_rgb = name_to_rgb(target_color_name)
+    t_h, t_s, t_l = rgb_to_hsl(*target_rgb)
 
-    model_match = re.search(r"\[([^\]]+)\]", prompt)
-    model_name = model_match.group(1) if model_match else "Vehicle"
-    draw.text((40, 40), f"MODEL: {model_name.upper()}", fill=accent_color)
-    draw.text((40, 60), f"COLOR FINISH: {color.upper()}", fill=text_color)
-    draw.text((40, height - 80), f"Job #{job_id} | Provider: {provider_label}\nPrompt: {prompt[:80]}...", fill=text_color)
-    draw.rectangle([0, 0, width - 1, height - 1], outline=accent_color, width=8)
+    # Load + remove background
+    src = Image.open(ref_path).convert("RGBA")
+    fg = _rembg_remove(src)
 
+    # Resize keeping aspect ratio, pad to target size
+    fg.thumbnail(image_size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", image_size, (0, 0, 0, 0))
+    offset = ((image_size[0] - fg.width) // 2, (image_size[1] - fg.height) // 2)
+    canvas.paste(fg, offset, fg)
+
+    r_arr, g_arr, b_arr, a_arr = canvas.split()
+    r_data = list(r_arr.getdata())
+    g_data = list(g_arr.getdata())
+    b_data = list(b_arr.getdata())
+    a_data = list(a_arr.getdata())
+
+    # Detect achromatic (silver / white / black) targets
+    is_achromatic = t_s < 0.08 or target_color_name.lower().strip() in ("silver", "white", "black", "gray", "grey", "charcoal")
+
+    new_r, new_g, new_b = [], [], []
+    for i, (r, g, b, a) in enumerate(zip(r_data, g_data, b_data, a_data)):
+        if a < 30:  # fully transparent
+            new_r.append(r); new_g.append(g); new_b.append(b)
+            continue
+
+        h, s, l = rgb_to_hsl(r, g, b)
+
+        # Preserve glass / chrome: very high luminance or very low saturation bright pixels
+        if l > 0.88 or (l > 0.75 and s < 0.10):
+            new_r.append(r); new_g.append(g); new_b.append(b)
+            continue
+
+        # Preserve very dark shadow pixels (deep blacks) unchanged
+        if l < 0.08:
+            new_r.append(r); new_g.append(g); new_b.append(b)
+            continue
+
+        if is_achromatic:
+            # For metallic / neutral targets: desaturate and scale luminance
+            new_s = s * 0.15  # nearly achromatic
+            if target_color_name.lower().strip() == "silver":
+                new_l = 0.45 + l * 0.45   # mid-bright
+            elif target_color_name.lower().strip() in ("white",):
+                new_l = 0.75 + l * 0.22
+            elif target_color_name.lower().strip() in ("black", "charcoal"):
+                new_l = l * 0.35
+            else:
+                new_l = t_l * 0.6 + l * 0.4
+            nr, ng, nb = hsl_to_rgb(t_h, new_s, new_l)
+        else:
+            # Chromatic target: shift hue fully, blend saturation, preserve luminance structure
+            new_h = t_h
+            new_s = t_s * 0.6 + s * 0.4
+            # Keep relative luminance but center around target luminance
+            new_l = t_l * 0.55 + l * 0.45
+            nr, ng, nb = hsl_to_rgb(new_h, new_s, new_l)
+
+        new_r.append(max(0, min(255, nr)))
+        new_g.append(max(0, min(255, ng)))
+        new_b.append(max(0, min(255, nb)))
+
+    result_r = Image.new("L", image_size); result_r.putdata(new_r)
+    result_g = Image.new("L", image_size); result_g.putdata(new_g)
+    result_b = Image.new("L", image_size); result_b.putdata(new_b)
+    result_a = a_arr
+
+    recolored = Image.merge("RGBA", (result_r, result_g, result_b, result_a))
+
+    # Add subtle drop-shadow for depth
+    shadow = recolored.filter(ImageFilter.GaussianBlur(radius=12))
+    shadow = ImageOps.colorize(shadow.convert("L"), black=(0, 0, 0), white=(200, 200, 210))
+    shadow_rgba = shadow.convert("RGBA")
+    s_data = list(shadow_rgba.getdata())
+    a_shadow = [int(a * 0.25) for _, _, _, a in s_data]  # 25% opacity shadow
+    shadow_rgba.putalpha(Image.new("L", image_size, 0))
+    a_layer = Image.new("L", image_size)
+    a_layer.putdata(a_shadow)
+    shadow_rgba.putalpha(a_layer)
+
+    # Studio background
+    background = _make_studio_background(image_size, bg_color)
+    background.paste(shadow_rgba, (4, 8), shadow_rgba)  # shadow offset
+    background.paste(recolored, (0, 0), recolored)
+
+    # Ground reflection (subtle)
+    reflection = recolored.transpose(Image.FLIP_TOP_BOTTOM)
+    fade = Image.new("L", image_size, 0)
+    fade_draw = ImageDraw.Draw(fade)
+    for y_px in range(image_size[1] // 3):
+        alpha = int(80 * (1 - y_px / (image_size[1] / 3)))
+        fade_draw.line([(0, y_px), (image_size[0], y_px)], fill=alpha)
+    reflection.putalpha(fade)
+    background.paste(reflection, (0, image_size[1] - image_size[1] // 3), reflection)
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    background.save(out_path, "PNG")
+    return out_path
+
+
+def _make_studio_background(
+    size: tuple[int, int],
+    base_color: tuple[int, int, int] = (255, 255, 255),
+) -> Image.Image:
+    """Create a gradient studio backdrop (bright center, slight vignette)."""
+    bg = Image.new("RGB", size, base_color)
+    draw = ImageDraw.Draw(bg)
+    cx, cy = size[0] // 2, size[1] // 2
+    max_r = math.sqrt(cx ** 2 + cy ** 2)
+    # Radial gradient: white center → light grey edges
+    for y in range(size[1]):
+        for x in range(0, size[0], 4):  # sample every 4px for speed
+            dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+            t = min(dist / max_r, 1.0)
+            shade = int(255 - t * 30)  # 255 → 225
+            color = (shade, shade, shade + 5)
+            draw.line([(x, y), (min(x + 3, size[0] - 1), y)], fill=color)
+    return bg
+
+
+# ---------------------------------------------------------------------------
+# Mock generation (no API key) — improved realistic placeholder
+# ---------------------------------------------------------------------------
+
+def generate_mock_image(
+    job_id: str,
+    prompt: str,
+    color: str,
+    out_dir: str,
+    provider_label: str = "Mock",
+    ref_image_path: Optional[str] = None,
+    image_size: tuple[int, int] = (800, 600),
+) -> str:
+    """
+    If a reference image is provided, recolor it.
+    Otherwise, draw a detailed product placeholder with correct color.
+    """
     out_path = os.path.join(out_dir, raw_filename(color))
+
+    if ref_image_path and os.path.isfile(ref_image_path):
+        try:
+            return recolor_reference(ref_image_path, color, out_path, image_size=image_size)
+        except Exception as exc:
+            print(f"[warn] recolor failed ({exc}), falling back to drawn mock", file=sys.stderr)
+
+    # ── Drawn mock ──
+    color_rgb = name_to_rgb(color)
+    bg_dark = tuple(max(0, c - 40) for c in color_rgb)
+    img = Image.new("RGB", image_size, (240, 240, 242))
+    draw = ImageDraw.Draw(img)
+
+    # Background gradient
+    for y in range(image_size[1]):
+        t = y / image_size[1]
+        r = int(240 - t * 30)
+        g = int(240 - t * 28)
+        b = int(242 - t * 25)
+        draw.line([(0, y), (image_size[0], y)], fill=(r, g, b))
+
+    # Ground line
+    gy = int(image_size[1] * 0.72)
+    for y in range(gy, image_size[1]):
+        t = (y - gy) / (image_size[1] - gy)
+        shade = int(210 - t * 30)
+        draw.line([(0, y), (image_size[0], y)], fill=(shade, shade, shade + 5))
+
+    # Car body
+    cx, cy_body = image_size[0] // 2, int(image_size[1] * 0.55)
+    body = [
+        (cx - 290, cy_body + 35), (cx - 230, cy_body - 25),
+        (cx - 140, cy_body - 75), (cx + 100, cy_body - 75),
+        (cx + 200, cy_body - 20), (cx + 270, cy_body + 20),
+        (cx + 285, cy_body + 55), (cx - 290, cy_body + 55),
+    ]
+    draw.polygon(body, fill=color_rgb, outline=tuple(max(0, c - 60) for c in color_rgb), width=2)
+
+    # Cabin
+    cabin = [
+        (cx - 200, cy_body - 20), (cx - 130, cy_body - 68),
+        (cx + 85, cy_body - 68), (cx + 170, cy_body - 18),
+        (cx - 200, cy_body - 20),
+    ]
+    draw.polygon(cabin, fill=tuple(min(255, c + 20) for c in color_rgb), outline=(200, 210, 220), width=1)
+
+    # Windows
+    draw.polygon([
+        (cx - 185, cy_body - 22), (cx - 120, cy_body - 60),
+        (cx - 30, cy_body - 60), (cx - 30, cy_body - 22),
+    ], fill=(100, 140, 180, 200), outline=(150, 180, 210))
+    draw.polygon([
+        (cx - 20, cy_body - 60), (cx + 80, cy_body - 60),
+        (cx + 160, cy_body - 20), (cx - 20, cy_body - 20),
+    ], fill=(100, 140, 180, 200), outline=(150, 180, 210))
+
+    # Wheels
+    w_r = 42
+    for wx in [cx - 170, cx + 155]:
+        wy = cy_body + 50
+        # Tyre shadow
+        draw.ellipse([wx - w_r - 3, wy - 5, wx + w_r + 3, wy + 12], fill=(60, 60, 60))
+        # Tyre
+        draw.ellipse([wx - w_r, wy - w_r, wx + w_r, wy + w_r], fill=(25, 25, 25))
+        # Rim
+        draw.ellipse([wx - 26, wy - 26, wx + 26, wy + 26], fill=(190, 195, 200), outline=(140, 145, 150))
+        # Hub spokes
+        for angle in range(0, 360, 60):
+            rad = math.radians(angle)
+            x1, y1 = wx + int(10 * math.cos(rad)), wy + int(10 * math.sin(rad))
+            x2, y2 = wx + int(24 * math.cos(rad)), wy + int(24 * math.sin(rad))
+            draw.line([(x1, y1), (x2, y2)], fill=(130, 135, 140), width=2)
+
+    # Headlights / taillights
+    draw.polygon([(cx - 285, cy_body + 10), (cx - 255, cy_body - 5),
+                  (cx - 240, cy_body + 8), (cx - 275, cy_body + 25)],
+                 fill=(255, 240, 180))
+    draw.polygon([(cx + 255, cy_body + 5), (cx + 278, cy_body + 10),
+                  (cx + 272, cy_body + 30), (cx + 248, cy_body + 25)],
+                 fill=(255, 60, 60))
+
+    # Label
+    label_color = (30, 30, 30) if sum(color_rgb) > 400 else (220, 220, 220)
+    draw.text((18, 14), f"ChromaCraft AI  ·  {color.upper()}", fill=label_color)
+    draw.text((18, image_size[1] - 26), f"Job #{job_id}  |  {provider_label}", fill=(130, 130, 130))
+
+    os.makedirs(out_dir, exist_ok=True)
     img.save(out_path, "PNG")
     return out_path
 
 
-def apply_color_tint(ref_path: str, color_name: str, out_path: str) -> str:
-    img = Image.open(ref_path).convert("RGBA")
-    color_rgb = get_color_rgb(color_name)
-    color_layer = Image.new("RGBA", img.size, color=(color_rgb[0], color_rgb[1], color_rgb[2], 255))
-    tinted = ImageChops.multiply(img, color_layer)
-    blended = Image.blend(img, tinted, 0.55)
-    gray = img.convert("L")
-    mask = gray.point(lambda x: 255 if x < 248 else 0, "1")
-    r, g, b, a = img.split()
-    combined_mask = ImageChops.multiply(a, mask.convert("L"))
-    final_img = Image.composite(blended, img, combined_mask)
-    final_img.save(out_path, "PNG")
-    return out_path
+# ---------------------------------------------------------------------------
+# OpenAI DALL·E 3 generation
+# ---------------------------------------------------------------------------
 
+def generate_openai_image(
+    prompt: str, color: str, api_key: str, out_dir: str,
+    ref_image_path: Optional[str] = None,
+    image_size: tuple[int, int] = (800, 600),
+) -> str:
+    """
+    Generate via DALL·E 3. If a ref image exists, use GPT-4o vision to get
+    a detailed description first, then inject it into the generation prompt.
+    """
+    enhanced_prompt = _build_openai_prompt(prompt, color, api_key, ref_image_path)
+    dalle_size = "1024x1024"  # DALL-E 3 supports: 1024x1024, 1792x1024, 1024x1792
+    if image_size[0] > image_size[1]:
+        dalle_size = "1792x1024"
 
-def generate_openai_image(prompt: str, color: str, api_key: str, out_dir: str) -> str:
-    color_prompt = f"{prompt}. Vehicle exterior color: {color}."
     response = requests.post(
         "https://api.openai.com/v1/images/generations",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": "dall-e-3", "prompt": color_prompt, "n": 1, "size": "1024x1024"},
-        timeout=60,
+        json={
+            "model": "dall-e-3",
+            "prompt": enhanced_prompt,
+            "n": 1,
+            "size": dalle_size,
+            "quality": "hd",
+            "style": "natural",
+        },
+        timeout=90,
     )
     response.raise_for_status()
     img_url = response.json()["data"][0]["url"]
-    img_data = requests.get(img_url, timeout=30).content
+    img_data = requests.get(img_url, timeout=45).content
+
+    # Resize to target dimensions
+    raw_img = Image.open(BytesIO(img_data)).convert("RGBA")
+    raw_img = raw_img.resize(image_size, Image.Resampling.LANCZOS)
+
     out_path = os.path.join(out_dir, raw_filename(color))
-    with open(out_path, "wb") as f:
-        f.write(img_data)
+    os.makedirs(out_dir, exist_ok=True)
+    raw_img.save(out_path, "PNG")
     return out_path
 
 
-def generate_stability_image(prompt: str, color: str, api_key: str, out_dir: str) -> str:
-    color_prompt = f"{prompt}. Vehicle exterior color: {color}."
-    response = requests.post(
-        "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"},
-        json={
-            "text_prompts": [{"text": color_prompt, "weight": 1}],
-            "cfg_scale": 7, "height": 1024, "width": 1024, "samples": 1, "steps": 30,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    img_b64 = response.json()["artifacts"][0]["base64"]
-    img_data = base64.b64decode(img_b64)
-    out_path = os.path.join(out_dir, raw_filename(color))
-    with open(out_path, "wb") as f:
-        f.write(img_data)
-    return out_path
+def _build_openai_prompt(
+    base_prompt: str,
+    color: str,
+    api_key: str,
+    ref_image_path: Optional[str],
+) -> str:
+    """Use GPT-4o vision to analyze reference image and build an enhanced prompt."""
+    if not ref_image_path or not os.path.isfile(ref_image_path):
+        color_prompt = re.sub(r"\[color\]", color, base_prompt, flags=re.IGNORECASE)
+        return (
+            f"{color_prompt}. "
+            f"Vehicle exterior paint: {color}. "
+            "Photorealistic automotive product catalog image. "
+            "Studio white background. Front-right three-quarter view. "
+            "Professional lighting with soft shadows. No text or watermarks."
+        )
 
+    try:
+        with open(ref_image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+        ext = Path(ref_image_path).suffix.lstrip(".").lower()
+        mime = f"image/{ext}" if ext in ("jpg", "jpeg", "png", "webp") else "image/jpeg"
 
-def call_groq_api(prompt: str, color: str, api_key: str) -> str:
-    response = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": "llama3-8b-8192",
-            "messages": [
-                {"role": "system", "content": (
-                    "You are an expert prompt engineer for text-to-image AI generators. "
-                    "Expand and enhance the user's base image prompt to describe a stunning, professional automotive catalog photo. "
-                    "Explicitly specify the exterior paint finish color. Provide ONLY the enhanced prompt string."
-                )},
-                {"role": "user", "content": f"Base prompt: {prompt}. Paint color: {color}."},
-            ],
-            "temperature": 0.7,
-        },
-        timeout=30,
+        vision_resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gpt-4o",
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": (
+                            "You are an expert automotive photographer. "
+                            "Describe this product in detail for a text-to-image prompt: "
+                            "exact make/model, body style, wheel design, grille shape, "
+                            "headlight style, and any distinguishing features. "
+                            "Keep the description under 100 words. Output only the description."
+                        )},
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:{mime};base64,{img_b64}", "detail": "high"
+                        }},
+                    ],
+                }],
+                "max_tokens": 200,
+            },
+            timeout=30,
+        )
+        vision_resp.raise_for_status()
+        description = vision_resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception as exc:
+        print(f"[warn] vision description failed: {exc}", file=sys.stderr)
+        description = "the vehicle shown in the reference image"
+
+    color_prompt = re.sub(r"\[color\]", color, base_prompt, flags=re.IGNORECASE)
+    return (
+        f"{color_prompt}. "
+        f"Exact model: {description}. "
+        f"Paint color: {color}. "
+        "Professional automotive catalog photograph. "
+        "Pure white studio background. Front-right three-quarter view. "
+        "Soft diffused lighting, subtle reflections. No text, no people."
     )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"].strip().strip('"')
 
 
 # ---------------------------------------------------------------------------
-# Task: generate (single color, JSON output)
+# Stability AI generation
+# ---------------------------------------------------------------------------
+
+def generate_stability_image(
+    prompt: str, color: str, api_key: str, out_dir: str,
+    ref_image_path: Optional[str] = None,
+    image_size: tuple[int, int] = (800, 600),
+) -> str:
+    color_prompt = (
+        f"{re.sub(r'[[]color[]]', color, prompt, flags=re.IGNORECASE)}. "
+        f"Vehicle paint color: {color}. "
+        "Photorealistic product catalog. White background. Studio lighting."
+    )
+
+    # Use img2img if reference available
+    if ref_image_path and os.path.isfile(ref_image_path):
+        ref_img = Image.open(ref_image_path).convert("RGB").resize((1024, 1024))
+        buf = BytesIO(); ref_img.save(buf, "PNG")
+        response = requests.post(
+            "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/image-to-image",
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            files={"init_image": ("ref.png", buf.getvalue(), "image/png")},
+            data={
+                "text_prompts[0][text]": color_prompt,
+                "text_prompts[0][weight]": "1",
+                "text_prompts[1][text]": "watermark, text, blurry, low quality",
+                "text_prompts[1][weight]": "-1",
+                "image_strength": "0.45",
+                "cfg_scale": "7",
+                "samples": "1",
+                "steps": "40",
+            },
+            timeout=90,
+        )
+    else:
+        response = requests.post(
+            "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"},
+            json={
+                "text_prompts": [
+                    {"text": color_prompt, "weight": 1},
+                    {"text": "watermark, text, blurry, low quality, distorted", "weight": -1},
+                ],
+                "cfg_scale": 7, "height": 1024, "width": 1024, "samples": 1, "steps": 40,
+            },
+            timeout=90,
+        )
+
+    response.raise_for_status()
+    img_b64 = response.json()["artifacts"][0]["base64"]
+    raw_img = Image.open(BytesIO(base64.b64decode(img_b64))).convert("RGBA")
+    raw_img = raw_img.resize(image_size, Image.Resampling.LANCZOS)
+
+    out_path = os.path.join(out_dir, raw_filename(color))
+    os.makedirs(out_dir, exist_ok=True)
+    raw_img.save(out_path, "PNG")
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Groq → text-enhanced mock
+# ---------------------------------------------------------------------------
+
+def generate_groq_image(
+    prompt: str, color: str, api_key: str, out_dir: str,
+    job_id: str = "0",
+    ref_image_path: Optional[str] = None,
+    image_size: tuple[int, int] = (800, 600),
+) -> str:
+    """Use Groq LLM to enhance the prompt, then apply recoloring to ref image."""
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "llama3-8b-8192",
+                "messages": [
+                    {"role": "system", "content": (
+                        "You are an automotive photography expert. "
+                        "Expand the base prompt into a detailed DALL-E style prompt. "
+                        "Specify the exact {color} paint finish, studio lighting, "
+                        "background, and composition. Output ONLY the final prompt string."
+                    )},
+                    {"role": "user", "content": f"Base: {prompt}. Paint color: {color}."},
+                ],
+                "temperature": 0.5,
+                "max_tokens": 200,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        enhanced = resp.json()["choices"][0]["message"]["content"].strip().strip('"')
+    except Exception as exc:
+        print(f"[warn] Groq API: {exc}", file=sys.stderr)
+        enhanced = f"{prompt}. Vehicle paint color: {color}."
+
+    return generate_mock_image(job_id, enhanced, color, out_dir, "Groq+Mock", ref_image_path, image_size)
+
+
+# ---------------------------------------------------------------------------
+# 360° turntable spin generation
+# ---------------------------------------------------------------------------
+
+def generate_spin360(
+    ref_path: str,
+    out_dir: str,
+    prefix: str,
+    frames: int = 36,
+    image_size: tuple[int, int] = (800, 600),
+) -> list[str]:
+    """
+    Generate `frames` rotation frames of a product by perspective-warping
+    a recolored reference image. Each frame simulates a 360/frames degree rotation.
+    Returns list of output file paths.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Load the reference (use rembg-isolated subject)
+    try:
+        from rembg import remove as rembg_remove
+        with open(ref_path, "rb") as f:
+            raw = f.read()
+        subject = Image.open(BytesIO(rembg_remove(raw))).convert("RGBA")
+    except Exception:
+        subject = Image.open(ref_path).convert("RGBA")
+
+    # Fit subject inside frame
+    subject.thumbnail(image_size, Image.Resampling.LANCZOS)
+    sw, sh = subject.size
+
+    generated = []
+    for i in range(frames):
+        angle_deg = (360.0 / frames) * i
+        angle_rad = math.radians(angle_deg)
+
+        # Perspective compression: simulate looking from a different angle
+        # At 0° = full width; at 90°/270° = minimal width (edge-on)
+        compression = abs(math.cos(angle_rad))
+        # Never go below 15% width (so we always see something)
+        compression = max(0.15, compression)
+
+        new_w = max(4, int(sw * compression))
+        frame_img = subject.resize((new_w, sh), Image.Resampling.LANCZOS)
+
+        # Darken/lighten to simulate lighting from the left
+        brightness_factor = 0.55 + 0.45 * ((math.cos(angle_rad) + 1) / 2)
+        enhancer = ImageEnhance.Brightness(frame_img)
+        frame_img = enhancer.enhance(brightness_factor)
+
+        # Flip horizontally for angles > 180 (back side)
+        if 90 < angle_deg <= 270:
+            frame_img = ImageOps.mirror(frame_img)
+
+        # Create studio background and paste
+        bg = _make_studio_background(image_size)
+        bg = bg.convert("RGBA")
+        px = (image_size[0] - new_w) // 2
+        py = (image_size[1] - sh) // 2
+        bg.paste(frame_img, (px, py), frame_img)
+
+        # Ground reflection
+        _add_ground_reflection(bg, frame_img, px, py, sh, image_size)
+
+        out_path = os.path.join(out_dir, f"{prefix}_spin_{i:03d}.png")
+        bg.convert("RGB").save(out_path, "PNG")
+        generated.append(out_path)
+
+    return generated
+
+
+def _add_ground_reflection(
+    canvas: Image.Image,
+    subject: Image.Image,
+    px: int, py: int, sh: int,
+    canvas_size: tuple[int, int],
+) -> None:
+    refl = subject.transpose(Image.FLIP_TOP_BOTTOM)
+    refl_h = min(sh // 3, canvas_size[1] - (py + sh))
+    if refl_h <= 0:
+        return
+    refl = refl.crop((0, sh - refl_h, refl.width, sh))
+    fade = Image.new("L", refl.size, 0)
+    fade_draw = ImageDraw.Draw(fade)
+    for y in range(refl_h):
+        a = int(60 * (1 - y / refl_h))
+        fade_draw.line([(0, y), (refl.width, y)], fill=a)
+    refl.putalpha(fade)
+    canvas.paste(refl, (px, py + sh), refl)
+
+
+# ---------------------------------------------------------------------------
+# Video generation from spin frames (GIF + optional MP4 via ffmpeg)
+# ---------------------------------------------------------------------------
+
+def generate_video_from_frames(
+    frames_dir: str,
+    output_path: str,
+    prefix: str,
+    fps: int = 12,
+) -> str:
+    """
+    Stitch spin frames into an animated GIF. Also tries ffmpeg for MP4.
+    Returns path to the primary output (MP4 if available, else GIF).
+    """
+    pattern = re.compile(rf"^{re.escape(prefix)}_spin_(\d{{3}})\.png$")
+    frame_files = sorted(
+        [f for f in os.listdir(frames_dir) if pattern.match(f)],
+        key=lambda x: int(pattern.match(x).group(1)),
+    )
+    if not frame_files:
+        raise FileNotFoundError(f"No spin frames found in {frames_dir} for prefix '{prefix}'")
+
+    frames_imgs = [Image.open(os.path.join(frames_dir, f)).convert("RGB") for f in frame_files]
+
+    # Animated GIF
+    gif_path = output_path if output_path.endswith(".gif") else output_path.replace(".mp4", ".gif")
+    os.makedirs(os.path.dirname(gif_path) or ".", exist_ok=True)
+    frames_imgs[0].save(
+        gif_path,
+        save_all=True,
+        append_images=frames_imgs[1:],
+        duration=int(1000 / fps),
+        loop=0,
+        optimize=True,
+    )
+
+    # Try MP4 with ffmpeg
+    mp4_path = gif_path.replace(".gif", ".mp4")
+    try:
+        tmp_pattern = os.path.join(frames_dir, f"{prefix}_spin_%03d.png")
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-framerate", str(fps),
+                "-i", tmp_pattern,
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-crf", "22",
+                mp4_path,
+            ],
+            capture_output=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return mp4_path
+    except Exception as exc:
+        print(f"[warn] ffmpeg not available, using GIF: {exc}", file=sys.stderr)
+
+    return gif_path
+
+
+# ---------------------------------------------------------------------------
+# Task dispatchers
 # ---------------------------------------------------------------------------
 
 def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
     colors = parse_colors(args.colors)
     if not colors:
-        _output_error("--colors must contain at least one color name", json_mode)
+        _emit_error("--colors must specify at least one color name", json_mode)
         return 1
 
     os.makedirs(args.outDir, exist_ok=True)
-    provider_lower = args.provider.lower()
-    results = []
+    provider = args.provider.lower()
+    w, h = _parse_size(getattr(args, "imageSize", "800x600"))
 
     for color in colors:
         try:
             color_prompt = re.sub(r"\[color\]", color, args.prompt, flags=re.IGNORECASE)
-
-            if args.refImage and os.path.exists(args.refImage):
-                out_path = os.path.join(args.outDir, raw_filename(color))
-                apply_color_tint(args.refImage, color, out_path)
-            elif not args.apiKey or args.apiKey == "none" or provider_lower == "mock":
-                out_path = generate_mock_image(args.jobId, color_prompt, color, args.outDir)
-            elif "openai" in provider_lower:
-                out_path = generate_openai_image(color_prompt, color, args.apiKey, args.outDir)
-            elif "stability" in provider_lower:
-                out_path = generate_stability_image(color_prompt, color, args.apiKey, args.outDir)
-            elif "groq" in provider_lower:
-                try:
-                    enhanced = call_groq_api(color_prompt, color, args.apiKey)
-                except Exception as e:
-                    print(f"Groq API fallback: {e}", file=sys.stderr)
-                    enhanced = f"{color_prompt}. Vehicle exterior color: {color}."
-                out_path = generate_mock_image(args.jobId, enhanced, color, args.outDir, "GROQ AI (Llama-3)")
-            else:
-                out_path = generate_mock_image(args.jobId, color_prompt, color, args.outDir)
-
-            results.append({"color": color, "path": out_path, "status": "success"})
-            if json_mode:
-                # Emit one JSON line per color for streaming consumption by AgentController
-                print(json.dumps({"status": "success", "path": out_path, "metadata": f"color={color}"}), flush=True)
-            else:
-                print(f"Generated variant: {out_path}")
-
+            out_path = _dispatch_generation(
+                provider=provider,
+                prompt=color_prompt,
+                color=color,
+                api_key=args.apiKey,
+                out_dir=args.outDir,
+                job_id=args.jobId,
+                ref_image_path=getattr(args, "refImage", None),
+                image_size=(w, h),
+            )
+            _emit_success(out_path, f"color={color}", json_mode)
         except Exception as exc:
-            err_msg = str(exc)
-            results.append({"color": color, "status": "error", "reason": err_msg})
-            if json_mode:
-                print(json.dumps({"status": "error", "reason": err_msg}), flush=True)
-            else:
-                print(f"Error for color '{color}': {err_msg}", file=sys.stderr)
-            # Fallback: generate mock so the pipeline isn't fully blocked
+            _emit_error(str(exc), json_mode, context=f"color={color}")
+            # Fallback mock so pipeline isn't blocked
             try:
-                fallback_path = generate_mock_image(args.jobId, args.prompt, color, args.outDir)
-                if json_mode:
-                    print(json.dumps({"status": "success", "path": fallback_path, "metadata": f"color={color};fallback=true"}), flush=True)
+                fallback = generate_mock_image(
+                    args.jobId, args.prompt, color, args.outDir,
+                    "Fallback", getattr(args, "refImage", None), (w, h)
+                )
+                _emit_success(fallback, f"color={color};fallback=true", json_mode)
             except Exception:
                 pass
-
     return 0
 
 
-# ---------------------------------------------------------------------------
-# Task: rotate
-# ---------------------------------------------------------------------------
+def task_recolor(args: argparse.Namespace, json_mode: bool) -> int:
+    """Recolor a reference image for each requested color."""
+    if not args.refImage or not os.path.isfile(args.refImage):
+        _emit_error("--refImage path required and must exist for recolor task", json_mode)
+        return 1
+    colors = parse_colors(args.colors)
+    w, h = _parse_size(getattr(args, "imageSize", "800x600"))
+    os.makedirs(args.outDir, exist_ok=True)
+    for color in colors:
+        try:
+            out_path = os.path.join(args.outDir, raw_filename(color))
+            recolor_reference(args.refImage, color, out_path, image_size=(w, h))
+            _emit_success(out_path, f"color={color}", json_mode)
+        except Exception as exc:
+            _emit_error(str(exc), json_mode, context=f"color={color}")
+    return 0
+
+
+def task_spin360(args: argparse.Namespace, json_mode: bool) -> int:
+    """Generate 360° spin frames from a reference image."""
+    ref = getattr(args, "refImage", None) or getattr(args, "inputPath", None)
+    if not ref or not os.path.isfile(ref):
+        _emit_error("--refImage (or --inputPath) path required for spin360 task", json_mode)
+        return 1
+    frames = int(getattr(args, "frames", 36))
+    prefix = getattr(args, "prefix", "product")
+    w, h = _parse_size(getattr(args, "imageSize", "800x600"))
+    os.makedirs(args.outDir, exist_ok=True)
+    try:
+        paths = generate_spin360(ref, args.outDir, prefix, frames, (w, h))
+        for p in paths:
+            _emit_success(p, f"frame={os.path.basename(p)}", json_mode)
+    except Exception as exc:
+        _emit_error(str(exc), json_mode)
+        return 1
+    return 0
+
+
+def task_video(args: argparse.Namespace, json_mode: bool) -> int:
+    """Stitch pre-generated spin frames into a video / GIF."""
+    frames_dir = getattr(args, "framesDir", None) or args.outDir
+    prefix = getattr(args, "prefix", "product")
+    output_path = getattr(args, "outputPath", None) or os.path.join(frames_dir, f"{prefix}_360.mp4")
+    fps = int(getattr(args, "fps", 12))
+    try:
+        final = generate_video_from_frames(frames_dir, output_path, prefix, fps)
+        _emit_success(final, "type=video", json_mode)
+    except Exception as exc:
+        _emit_error(str(exc), json_mode)
+        return 1
+    return 0
+
 
 def task_rotate(args: argparse.Namespace, json_mode: bool) -> int:
     if not args.inputPath or not args.outputPath:
-        _output_error("--inputPath and --outputPath are required for rotate task", json_mode)
+        _emit_error("--inputPath and --outputPath are required for rotate task", json_mode)
         return 1
     degrees = int(getattr(args, "degrees", 90))
     try:
-        img = Image.open(args.inputPath)
-        rotated = img.rotate(-degrees, expand=True)
+        img = Image.open(args.inputPath).rotate(-degrees, expand=True)
         os.makedirs(os.path.dirname(args.outputPath) or ".", exist_ok=True)
-        rotated.save(args.outputPath, "PNG")
-        if json_mode:
-            print(json.dumps({"status": "success", "path": args.outputPath, "metadata": f"degrees={degrees}"}), flush=True)
-        else:
-            print(f"Rotated image saved to: {args.outputPath}")
-        return 0
+        img.save(args.outputPath, "PNG")
+        _emit_success(args.outputPath, f"degrees={degrees}", json_mode)
     except Exception as exc:
-        _output_error(str(exc), json_mode)
+        _emit_error(str(exc), json_mode)
         return 1
+    return 0
 
-
-# ---------------------------------------------------------------------------
-# Task: composite
-# ---------------------------------------------------------------------------
 
 def task_composite(args: argparse.Namespace, json_mode: bool) -> int:
     if not args.foreground or not args.background or not args.outputPath:
-        _output_error("--foreground, --background, and --outputPath are required for composite task", json_mode)
+        _emit_error("--foreground, --background, --outputPath required for composite task", json_mode)
         return 1
     try:
         fg = Image.open(args.foreground).convert("RGBA")
         bg = Image.open(args.background).convert("RGBA").resize(fg.size, Image.Resampling.LANCZOS)
-        composite = Image.alpha_composite(bg, fg)
+        result = Image.alpha_composite(bg, fg)
         os.makedirs(os.path.dirname(args.outputPath) or ".", exist_ok=True)
-        composite.save(args.outputPath, "PNG")
-        if json_mode:
-            print(json.dumps({"status": "success", "path": args.outputPath, "metadata": "composite"}), flush=True)
-        else:
-            print(f"Composite image saved to: {args.outputPath}")
-        return 0
+        result.save(args.outputPath, "PNG")
+        _emit_success(args.outputPath, "type=composite", json_mode)
     except Exception as exc:
-        _output_error(str(exc), json_mode)
+        _emit_error(str(exc), json_mode)
         return 1
+    return 0
 
 
 # ---------------------------------------------------------------------------
-# Utilities
+# Helpers
 # ---------------------------------------------------------------------------
 
-def _output_error(reason: str, json_mode: bool) -> None:
+def _dispatch_generation(
+    provider: str, prompt: str, color: str, api_key: str,
+    out_dir: str, job_id: str,
+    ref_image_path: Optional[str], image_size: tuple[int, int],
+) -> str:
+    no_key = not api_key or api_key.strip().lower() in ("none", "", "mock")
+
+    if no_key or provider == "mock":
+        return generate_mock_image(job_id, prompt, color, out_dir,
+                                   "Mock", ref_image_path, image_size)
+    if "openai" in provider:
+        return generate_openai_image(prompt, color, api_key, out_dir,
+                                     ref_image_path, image_size)
+    if "stability" in provider:
+        return generate_stability_image(prompt, color, api_key, out_dir,
+                                        ref_image_path, image_size)
+    if "groq" in provider:
+        return generate_groq_image(prompt, color, api_key, out_dir,
+                                   job_id, ref_image_path, image_size)
+    # Unknown provider → mock
+    return generate_mock_image(job_id, prompt, color, out_dir,
+                               f"Unknown:{provider}", ref_image_path, image_size)
+
+
+def _parse_size(size_str: str) -> tuple[int, int]:
+    try:
+        w, h = size_str.lower().split("x")
+        return (int(w), int(h))
+    except Exception:
+        return (800, 600)
+
+
+def _emit_success(path: str, metadata: str, json_mode: bool) -> None:
     if json_mode:
-        print(json.dumps({"status": "error", "reason": reason}), flush=True)
+        print(json.dumps({"status": "success", "path": path, "metadata": metadata}), flush=True)
     else:
-        print(f"Error: {reason}", file=sys.stderr)
+        print(f"[OK] {path}  ({metadata})")
+
+
+def _emit_error(reason: str, json_mode: bool, context: str = "") -> None:
+    if json_mode:
+        print(json.dumps({"status": "error", "reason": reason, "context": context}), flush=True)
+    else:
+        print(f"[ERR] {reason}" + (f" ({context})" if context else ""), file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
-# Argument parser & main
+# Argument parser
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="ChromaCraft Image Generation Tool")
-    # Task dispatch (ReAct mode)
-    parser.add_argument("--task", choices=["generate", "rotate", "composite"], default="generate",
-                        help="Tool to execute (default: generate)")
-    parser.add_argument("--jsonMode", action="store_true",
-                        help="Emit results as JSON lines on stdout")
+    p = argparse.ArgumentParser(description="ChromaCraft Image Generation Tool")
+    p.add_argument("--task",
+                   choices=["generate", "recolor", "spin360", "video", "rotate", "composite"],
+                   default="generate")
+    p.add_argument("--jsonMode", action="store_true")
 
-    # generate task args
-    parser.add_argument("--jobId", default="0", help="Job identifier")
-    parser.add_argument("--prompt", default="", help="Prompt text")
-    parser.add_argument("--provider", default="mock", help="AI Provider name")
-    parser.add_argument("--apiKey", default="none", help="Provider API Key")
-    parser.add_argument("--outDir", default=".", help="Output directory path")
-    parser.add_argument("--colors", default="", help="Comma-separated color names")
-    parser.add_argument("--refImage", default=None, help="Path to reference uploaded image")
+    # generate / recolor
+    p.add_argument("--jobId", default="0")
+    p.add_argument("--prompt", default="")
+    p.add_argument("--provider", default="mock")
+    p.add_argument("--apiKey", default="none")
+    p.add_argument("--outDir", default=".")
+    p.add_argument("--colors", default="White")
+    p.add_argument("--refImage", default=None)
+    p.add_argument("--imageSize", default="800x600", help="WxH e.g. 1024x768")
 
-    # rotate task args
-    parser.add_argument("--inputPath", default=None, help="Input image path (rotate/composite)")
-    parser.add_argument("--degrees", type=int, default=90, help="Rotation degrees (rotate)")
+    # spin360 / video
+    p.add_argument("--frames", type=int, default=36, help="Number of 360 spin frames")
+    p.add_argument("--prefix", default="product", help="Output filename prefix")
+    p.add_argument("--framesDir", default=None, help="Directory containing spin frames (video task)")
+    p.add_argument("--fps", type=int, default=12)
 
-    # composite task args
-    parser.add_argument("--foreground", default=None, help="Foreground PNG path (composite)")
-    parser.add_argument("--background", default=None, help="Background PNG path (composite)")
-    parser.add_argument("--outputPath", default=None, help="Output path (rotate/composite)")
+    # rotate
+    p.add_argument("--inputPath", default=None)
+    p.add_argument("--degrees", type=int, default=90)
 
-    return parser
+    # composite
+    p.add_argument("--foreground", default=None)
+    p.add_argument("--background", default=None)
+    p.add_argument("--outputPath", default=None)
+
+    return p
 
 
 def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
-    json_mode: bool = args.jsonMode
-
-    if args.task == "generate":
-        return task_generate(args, json_mode)
-    elif args.task == "rotate":
-        return task_rotate(args, json_mode)
-    elif args.task == "composite":
-        return task_composite(args, json_mode)
-    else:
-        _output_error(f"Unknown task: {args.task}", json_mode)
-        return 1
+    args = build_parser().parse_args()
+    jm = args.jsonMode
+    dispatch = {
+        "generate": task_generate,
+        "recolor": task_recolor,
+        "spin360": task_spin360,
+        "video": task_video,
+        "rotate": task_rotate,
+        "composite": task_composite,
+    }
+    return dispatch[args.task](args, jm)
 
 
 if __name__ == "__main__":
