@@ -79,7 +79,7 @@ function derivePrefix(jobName: string, settings?: GenerateJobData['settings']): 
 }
 
 function resolveStoragePaths(jobId: number) {
-  const storageDir = process.env.STORAGE_PATH || path.join(__dirname, '..', '..', 'storage');
+  const storageDir = process.env.STORAGE_PATH || path.join(process.cwd(), '..', 'storage');
   const jobAssetDir = path.join(storageDir, 'assets', String(jobId));
   const processedDir = path.join(jobAssetDir, 'processed');
   return { storageDir, jobAssetDir, processedDir };

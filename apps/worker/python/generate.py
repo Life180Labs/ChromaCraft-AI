@@ -294,7 +294,15 @@ def generate_mock_image(
 
     if ref_image_path and os.path.isfile(ref_image_path):
         try:
-            return recolor_reference(ref_image_path, color, out_path, image_size=image_size)
+            res_path = recolor_reference(ref_image_path, color, out_path, image_size=image_size)
+            # Overlay the prompt onto the recolored image so the user can verify their prompt was used
+            img = Image.open(res_path).convert("RGB")
+            draw = ImageDraw.Draw(img)
+            draw.text((18, 14), f"ChromaCraft AI  ·  {color.upper()}", fill=(30, 30, 30))
+            draw.text((18, 30), f"Prompt: {prompt[:100]}...", fill=(60, 60, 60))
+            draw.text((18, image_size[1] - 26), f"Job #{job_id}  |  {provider_label}", fill=(130, 130, 130))
+            img.save(res_path, "PNG")
+            return res_path
         except Exception as exc:
             print(f"[warn] recolor failed ({exc}), falling back to drawn mock", file=sys.stderr)
 
@@ -588,7 +596,7 @@ def generate_groq_image(
         print(f"[warn] Groq API: {exc}", file=sys.stderr)
         enhanced = f"{prompt}. Vehicle paint color: {color}."
 
-    return generate_mock_image(job_id, enhanced, color, out_dir, "Groq+Mock", ref_image_path, image_size)
+    raise ValueError("Groq is a text-only LLM and cannot generate images natively. Please use OpenAI (DALL-E) or Stability AI for true image generation, or provide a local Stable Diffusion endpoint.")
 
 
 # ---------------------------------------------------------------------------
@@ -772,15 +780,6 @@ def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
             _emit_success(out_path, f"color={color}", json_mode)
         except Exception as exc:
             _emit_error(str(exc), json_mode, context=f"color={color}")
-            # Fallback mock so pipeline isn't blocked
-            try:
-                fallback = generate_mock_image(
-                    args.jobId, args.prompt, color, args.outDir,
-                    "Fallback", getattr(args, "refImage", None), (w, h)
-                )
-                _emit_success(fallback, f"color={color};fallback=true", json_mode)
-            except Exception:
-                pass
     return 0
 
 
@@ -879,23 +878,16 @@ def _dispatch_generation(
     out_dir: str, job_id: str,
     ref_image_path: Optional[str], image_size: tuple[int, int],
 ) -> str:
-    no_key = not api_key or api_key.strip().lower() in ("none", "", "mock")
-
-    if no_key or provider == "mock":
-        return generate_mock_image(job_id, prompt, color, out_dir,
-                                   "Mock", ref_image_path, image_size)
     if "openai" in provider:
-        return generate_openai_image(prompt, color, api_key, out_dir,
-                                     ref_image_path, image_size)
-    if "stability" in provider:
-        return generate_stability_image(prompt, color, api_key, out_dir,
-                                        ref_image_path, image_size)
-    if "groq" in provider:
-        return generate_groq_image(prompt, color, api_key, out_dir,
-                                   job_id, ref_image_path, image_size)
-    # Unknown provider → mock
-    return generate_mock_image(job_id, prompt, color, out_dir,
-                               f"Unknown:{provider}", ref_image_path, image_size)
+        return generate_openai_image(prompt, color, api_key, out_dir, ref_image_path, image_size)
+    elif "stability" in provider:
+        return generate_stability_image(prompt, color, api_key, out_dir, ref_image_path, image_size)
+    elif "groq" in provider:
+        return generate_groq_image(prompt, color, api_key, out_dir, job_id, ref_image_path, image_size)
+    elif provider == "mock":
+        raise ValueError("Mock provider is disabled by user request. Please configure a valid AI Image generation provider (OpenAI or Stability AI) with a valid API key.")
+    
+    raise ValueError(f"Unknown provider '{provider}' or provider not capable of generating images.")
 
 
 def _parse_size(size_str: str) -> tuple[int, int]:
