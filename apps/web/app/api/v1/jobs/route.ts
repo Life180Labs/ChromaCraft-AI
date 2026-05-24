@@ -1,10 +1,8 @@
 import prisma from '../../../../lib/prisma';
 import { getUserId } from '../../../../lib/auth';
 import { NextResponse } from 'next/server';
-import { limiter } from '../../../../lib/rateLimit';
 
 export async function GET(request: Request) {
-  await limiter(request as any, {} as any, () => {});
   const url = new URL(request.url);
   const userId = await getUserId(request as any);
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
@@ -20,7 +18,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await limiter(request as any, {} as any, () => {});
   const userId = await getUserId(request as any);
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { name, prompt } = await request.json();
@@ -35,7 +32,6 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  await limiter(request as any, {} as any, () => {});
   const userId = await getUserId(request as any);
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { id, status } = await request.json();
@@ -47,7 +43,6 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  await limiter(request as any, {} as any, () => {});
   const userId = await getUserId(request as any);
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { id } = await request.json();

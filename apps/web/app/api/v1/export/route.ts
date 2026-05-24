@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
-import { limiter } from '../../../../lib/rateLimit';
 import archiver from 'archiver';
 import { createReadStream, existsSync } from 'fs';
 import { Readable } from 'stream';
@@ -58,7 +57,6 @@ export async function GET(req: NextRequest) {
       }
     } else {
       // Session-based access
-      await limiter(req as any, {} as any, () => {});
       const userId = await getUserId(req);
       if (!userId) {
         return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });

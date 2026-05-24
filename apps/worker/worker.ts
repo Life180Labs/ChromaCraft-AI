@@ -111,7 +111,7 @@ function resolveJobStoragePaths(jobId: number): JobStoragePaths {
 }
 
 async function runPythonScript(scriptName: string, args: string[]): Promise<PythonRunResult> {
-  const scriptPath = path.join(__dirname, 'python', scriptName);
+  const scriptPath = path.join(process.cwd(), 'python', scriptName);
   logger.info({ scriptPath, args }, 'Spawning Python process');
 
   const pythonProcess = spawn('python', [scriptPath, ...args]);

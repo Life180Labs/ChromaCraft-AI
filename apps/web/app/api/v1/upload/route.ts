@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
 import { uploadQueue } from '../../../../lib/bullmq';
-import { limiter } from '../../../../lib/rateLimit';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,7 +9,6 @@ import { v4 as uuidv4 } from 'uuid';
 export async function POST(req: NextRequest) {
   try {
     // Rate limit check
-    await limiter(req as any, {} as any, () => {});
 
     const userId = await getUserId(req);
     if (!userId) {

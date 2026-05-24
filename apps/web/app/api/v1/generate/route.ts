@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
 import { generateQueue } from '../../../../lib/bullmq';
-import { limiter } from '../../../../lib/rateLimit';
 
 export async function POST(req: NextRequest) {
   try {
-    await limiter(req as any, {} as any, () => {});
 
     const userId = await getUserId(req);
     if (!userId) {

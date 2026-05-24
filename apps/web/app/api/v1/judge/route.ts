@@ -94,7 +94,7 @@ async function callOpenAIVisionJudge(
 Your task: evaluate whether a generated product image meets the stated goal and color specification.
 
 Assessment Criteria:
-1. Does the product color match the requested color perfectly?
+1. Does the product color match the requested color? (Note: for metallic colors like silver, gold, or bronze, accept reasonable grey/white/yellow/metallic representations with specular highlights).
 2. Is the product visible and completely unobstructed?
 3. Does it meet high-quality catalog aesthetic standards (clean background, good lighting)?
 

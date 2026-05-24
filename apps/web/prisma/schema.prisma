@@ -21,6 +21,13 @@ enum JobType {
   LIFESTYLE_SCENES
 }
 
+enum IterationStatus {
+  RUNNING
+  PASSED
+  FAILED
+  RETRYING
+}
+
 enum Role {
   ADMIN
   USER
@@ -58,6 +65,10 @@ model Job {
   generation  Generation?
   providerId  Int?
   provider    AiProvider? @relation(fields: [providerId], references: [id])
+  
+  currentGoal   String?
+  statusHistory Json?
+  iterations    Iteration[]
 }
 
 model Asset {
@@ -81,6 +92,17 @@ model Generation {
   metadata Json?
   jobId    Int      @unique
   job      Job      @relation(fields: [jobId], references: [id])
+}
+
+model Iteration {
+  id         Int             @id @default(autoincrement())
+  jobId      Int
+  job        Job             @relation(fields: [jobId], references: [id])
+  prompt     String
+  critique   String?
+  status     IterationStatus @default(RUNNING)
+  assetPath  String?
+  createdAt  DateTime        @default(now())
 }
 
 model PasswordReset {
