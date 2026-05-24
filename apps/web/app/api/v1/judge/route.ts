@@ -15,6 +15,14 @@ export interface JudgeResponse {
   critique: string;
 }
 
+interface OpenAIResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
 /**
  * POST /api/v1/judge
  * Receives an imagePath (absolute server path) and goal string.
@@ -41,7 +49,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Verify the file exists on disk before any judgment call.
     const resolvedPath = path.resolve(imagePath);
-    if (!fs.existsSync(resolvedPath)) {
+    const fileExists = await fs.promises.stat(resolvedPath).then(() => true).catch(() => false);
+    if (!fileExists) {
       return NextResponse.json(
         { error: `Image not found at path: ${resolvedPath}` },
         { status: 404 },
@@ -56,7 +65,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Fallback: deterministic heuristic judge (no external call required).
-    const result = heuristicJudge(resolvedPath, goal, color);
+    const result = await heuristicJudge(resolvedPath, goal, color);
     return NextResponse.json(result);
   } catch (err: any) {
     console.error('[JudgeAPI] Error:', err);
@@ -77,15 +86,21 @@ async function callOpenAIVisionJudge(
   color: string,
   apiKey: string,
 ): Promise<JudgeResponse> {
-  const imageBuffer = fs.readFileSync(imagePath);
+  const imageBuffer = await fs.promises.readFile(imagePath);
   const base64Image = imageBuffer.toString('base64');
   const mimeType = 'image/png';
 
   const systemPrompt = `You are a strict QA vision inspector for an AI-powered product catalog generation system.
 Your task: evaluate whether a generated product image meets the stated goal and color specification.
+
+Assessment Criteria:
+1. Does the product color match the requested color perfectly?
+2. Is the product visible and completely unobstructed?
+3. Does it meet high-quality catalog aesthetic standards (clean background, good lighting)?
+
 Respond ONLY with valid JSON in this exact shape: { "passed": boolean, "critique": string }
-- "passed" must be true only if the image clearly shows the correct product color matching the specification.
-- "critique" must be a concise 1-2 sentence explanation of your verdict.
+- "passed" must be true only if ALL criteria are met.
+- "critique" must be a concise 1-2 sentence explanation of your verdict, specifically mentioning which criteria failed if any.
 Do not include any text outside the JSON object.`;
 
   const userContent = [
@@ -106,7 +121,7 @@ Do not include any text outside the JSON object.`;
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -121,7 +136,7 @@ Do not include any text outside the JSON object.`;
     throw new Error(`OpenAI Vision API error ${response.status}: ${errText}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as OpenAIResponse;
   const raw = data.choices?.[0]?.message?.content?.trim() ?? '';
 
   // Strip any markdown code fences the model may wrap around JSON.
@@ -146,8 +161,8 @@ Do not include any text outside the JSON object.`;
 // Checks file size and resolves color keyword presence in path.
 // ---------------------------------------------------------------------------
 
-function heuristicJudge(imagePath: string, _goal: string, color: string): JudgeResponse {
-  const stats = fs.statSync(imagePath);
+async function heuristicJudge(imagePath: string, _goal: string, color: string): Promise<JudgeResponse> {
+  const stats = await fs.promises.stat(imagePath);
 
   // A valid generated image should be larger than 5 KB.
   if (stats.size < 5120) {

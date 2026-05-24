@@ -49,6 +49,21 @@ export interface JudgeResponse {
   critique: string;
 }
 
+export class MaxRetriesExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaxRetriesExceededError';
+  }
+}
+
+interface OpenAIResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -100,7 +115,7 @@ export class AgentController {
       },
     });
 
-    fs.mkdirSync(params.outDir, { recursive: true });
+    await fs.promises.mkdir(params.outDir, { recursive: true });
 
     const results: VariantResult[] = [];
 
@@ -139,7 +154,7 @@ export class AgentController {
     basePrompt: string,
     params: GenerationParams,
   ): Promise<VariantResult> {
-    let currentPrompt = this.planPrompt(basePrompt, color, goal, null);
+    let currentPrompt = await this.planPrompt(basePrompt, color, goal, null);
     let attempt = 0;
     let lastCritique = '';
     let iterationId = 0;
@@ -174,7 +189,7 @@ export class AgentController {
         });
         lastCritique = reason;
         // Refine prompt with the failure reason and retry
-        currentPrompt = this.planPrompt(basePrompt, color, goal, lastCritique);
+        currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique);
         continue;
       }
 
@@ -222,39 +237,78 @@ export class AgentController {
           where: { id: iterationId },
           data: { status: IterationStatus.RETRYING },
         });
-        currentPrompt = this.planPrompt(basePrompt, color, goal, lastCritique);
+        currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique);
       }
     }
 
-    // All retries exhausted — return failure
-    return {
-      color,
-      iterationId,
-      assetPath,
-      passed: false,
-      critique: lastCritique,
-      attempts: attempt,
-    };
+    // All retries exhausted — throw circuit breaker error
+    throw new MaxRetriesExceededError(
+      `Failed to generate acceptable image for color "${color}" after ${MAX_ITERATIONS} attempts. Last critique: ${lastCritique}`
+    );
   }
 
   // ---------------------------------------------------------------------------
   // Plan: compose an enhanced, critique-aware prompt
   // ---------------------------------------------------------------------------
 
-  private planPrompt(basePrompt: string, color: string, goal: string, critique: string | null): string {
+  private async planPrompt(basePrompt: string, color: string, goal: string, critique: string | null): Promise<string> {
     const colorResolved = basePrompt.replace(/\[color\]/gi, color);
 
     if (!critique) {
       return `${colorResolved}. Vehicle exterior color: ${color}. Goal: ${goal}. Photorealistic, studio lighting, white background, catalog quality.`;
     }
 
+    const adjustmentInstructions = await this.synthesizeCritique(critique);
+
     return (
       `${colorResolved}. Vehicle exterior color: ${color}. ` +
       `Goal: ${goal}. ` +
-      `Previous attempt was rejected. Critique: "${critique}". ` +
-      `Correct the issues and produce a higher quality result. ` +
+      `Adjustment Instructions: ${adjustmentInstructions}. ` +
       `Photorealistic, studio lighting, white background, catalog quality.`
     );
+  }
+
+  private async synthesizeCritique(critique: string): Promise<string> {
+    const apiKey = process.env.AI_OPENAI_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return `Address this feedback: ${critique}`;
+    }
+
+    const systemPrompt = `You are an AI prompt engineering expert. 
+You are given a raw critique from a vision judge about a generated product image.
+Your task is to synthesize this critique into concise, actionable "Adjustment Instructions" for a text-to-image generator.
+Do not provide a full prompt, just the short instructions to append. (e.g. "Reduce reflection intensity," "Increase color saturation").
+Output ONLY the synthesized instructions string.`;
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Raw critique: ${critique}` },
+          ],
+          max_tokens: 150,
+          temperature: 0.2,
+        }),
+      });
+
+      if (!response.ok) {
+        logger.warn('Failed to synthesize critique via LLM, falling back to raw critique.');
+        return `Address this feedback: ${critique}`;
+      }
+
+      const data = (await response.json()) as OpenAIResponse;
+      return data.choices?.[0]?.message?.content?.trim() ?? `Address this feedback: ${critique}`;
+    } catch (err) {
+      logger.error({ err }, 'Error calling LLM for synthesizeCritique');
+      return `Address this feedback: ${critique}`;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -280,8 +334,11 @@ export class AgentController {
       '--jsonMode',
     ];
 
-    if (params.refImagePath && fs.existsSync(params.refImagePath)) {
-      args.push('--refImage', params.refImagePath);
+    if (params.refImagePath) {
+      const exists = await fs.promises.stat(params.refImagePath).then(() => true).catch(() => false);
+      if (exists) {
+        args.push('--refImage', params.refImagePath);
+      }
     }
 
     logger.debug({ jobId, color, args }, 'Spawning Python tool');
