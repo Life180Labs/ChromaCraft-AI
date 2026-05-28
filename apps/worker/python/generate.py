@@ -118,7 +118,7 @@ def generate_stability_identity(
 
 
 # ---------------------------------------------------------------------------
-# Strategy 2: SDXL + ControlNet via Replicate (Fallback)
+# Strategy 2: ControlNet (disabled — only Stability AI is supported)
 # ---------------------------------------------------------------------------
 
 def generate_sdxl_controlnet(
@@ -126,80 +126,9 @@ def generate_sdxl_controlnet(
     ref_image_path: Optional[str] = None,
     image_size: tuple[int, int] = (800, 600),
 ) -> str:
-    """
-    SDXL + ControlNet pipeline for structure-preserving recoloring.
-    Uses Canny edge control to lock geometry.
-    Requires REPLICATE_API_TOKEN in environment or passed as api_key.
-    Falls back to Stability identity generation if Replicate fails.
-    """
-    if not ref_image_path or not os.path.isfile(ref_image_path):
-        raise ValueError(f"Reference image not found at '{ref_image_path}'")
-
-    print(f"[INFO] SDXL ControlNet generation for {color}...", file=sys.stderr)
-
-    try:
-        import replicate
-    except ImportError:
-        print("[WARN] Replicate not installed. Falling back to Stability identity generation.", file=sys.stderr)
-        return generate_stability_identity(prompt, color, api_key, out_dir, ref_image_path, image_size)
-
-    # Generate ControlNet inputs (Canny edges)
-    control_dir = os.path.join(out_dir, "control_inputs")
-    control_inputs = save_control_inputs(ref_image_path, control_dir)
-    canny_path = control_inputs.get("canny")
-
-    if not canny_path or not os.path.isfile(canny_path):
-        raise ValueError("Canny edge map not generated")
-
-    try:
-        # Use the correct Replicate model for SDXL ControlNet
-        output = replicate.run(
-            "stability-ai/stable-diffusion:db21e45d3f7023abc2a46ab38be2d5c3c8b4a5c5d5f5c5a5c5d5e5f5a5c5d5e",
-            input={
-                "prompt": f"A {color.upper()} version of this product, identical shape and geometry, {color.upper()} color, high quality, detailed",
-                "negative_prompt": "different shape, distorted, deformed, low quality",
-                "width": image_size[0],
-                "height": image_size[1],
-                "num_outputs": 1,
-                "num_inference_steps": 30,
-                "guidance_scale": 7.5,
-                "seed": 42,
-            },
-        )
-    except Exception as e:
-        err_msg = str(e)
-        print(f"[WARN] Replicate ControlNet failed ({err_msg[:100]}). Falling back to Stability.", file=sys.stderr)
-        return generate_stability_identity(prompt, color, api_key, out_dir, ref_image_path, image_size)
-
-    # Replicate returns a URL or file list
-    if isinstance(output, list) and len(output) > 0:
-        img_url = str(output[0])
-    elif isinstance(output, str):
-        img_url = output
-    else:
-        print(f"[WARN] Unexpected Replicate output. Falling back to Stability.", file=sys.stderr)
-        return generate_stability_identity(prompt, color, api_key, out_dir, ref_image_path, image_size)
-
-    # Download result
-    img_resp = requests.get(img_url, timeout=60)
-    img_resp.raise_for_status()
-
-    out_path = os.path.join(out_dir, raw_filename(color))
-    img = Image.open(BytesIO(img_resp.content)).convert("RGBA")
-    img = img.resize(image_size, Image.Resampling.LANCZOS)
-    img.save(out_path, "PNG")
-
-    # Apply identity lock as second pass
-    try:
-        mask = create_segmentation_mask(ref_image_path)
-        locked_path = os.path.join(out_dir, f"locked_{raw_filename(color)}")
-        identity_lock_composite(ref_image_path, out_path, mask, locked_path, blur_radius=2)
-        if os.path.exists(locked_path):
-            os.replace(locked_path, out_path)
-    except Exception as e:
-        print(f"[WARN] Identity lock failed: {e}", file=sys.stderr)
-
-    return out_path
+    """Fallback: always delegates to Stability identity generation."""
+    print(f"[INFO] Using Stability identity generation for {color} (ControlNet disabled).", file=sys.stderr)
+    return generate_stability_identity(prompt, color, api_key, out_dir, ref_image_path, image_size)
 
 
 # ---------------------------------------------------------------------------
