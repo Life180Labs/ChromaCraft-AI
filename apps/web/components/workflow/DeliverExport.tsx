@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { TbDownload, TbLink, TbCheck, TbAlertTriangle, TbShare } from 'react-icons/tb';
 import { Button } from '../ui/Button';
 import type { Job } from '../shared/types';
@@ -10,11 +10,13 @@ type DeliverExportProps = {
   selectedJob: Job | null;
   onSelectJob: (job: Job) => void;
   exportUrl: string | null;
-  onExportUrl: () => void;
+  onExportUrl: (format?: string) => void;
 };
 
-export const DeliverExport: React.FC<DeliverExportProps> = ({ jobs, selectedJob, onSelectJob, exportUrl, onExportUrl }) => {
-  const completedJobs = jobs.filter(j => j.status === 'COMPLETED');
+export const DeliverExport: React.FC<DeliverExportProps> = ({ jobs = [], selectedJob, onSelectJob, exportUrl, onExportUrl }) => {
+  const [exportFormat, setExportFormat] = useState<string>('png');
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
+  const completedJobs = safeJobs.filter(j => j.status === 'COMPLETED');
   const assetCount = selectedJob?.assets?.length || 0;
   const approvedCount = selectedJob?.assets?.filter(a => a.status === 'approved').length || 0;
   const totalCount = selectedJob?.assets?.filter(a => a.type === 'processed').length || assetCount;
@@ -128,7 +130,7 @@ export const DeliverExport: React.FC<DeliverExportProps> = ({ jobs, selectedJob,
           <select
             value={selectedJob?.id || ''}
             onChange={(e) => {
-              const j = jobs.find((x) => x.id === Number(e.target.value));
+              const j = safeJobs.find((x) => x.id === Number(e.target.value));
               if (j) onSelectJob(j);
             }}
           >
@@ -142,12 +144,20 @@ export const DeliverExport: React.FC<DeliverExportProps> = ({ jobs, selectedJob,
         {selectedJob && (
           <>
             <div className="sec" style={{ margin: '12px 0 8px' }}>Delivery Package</div>
+            <div className="field">
+              <label>Export Format</label>
+              <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
+                <option value="png">PNG (Lossless, Transparent)</option>
+                <option value="jpeg">JPEG (Compressed)</option>
+                <option value="webp">WebP (Optimized)</option>
+              </select>
+            </div>
             <div className="del-row">
               <div>
                 <div className="del-name">Download ZIP Package</div>
                 <div className="del-meta">All processed catalog PNGs bundled</div>
               </div>
-              <Button variant="primary" onClick={() => window.open(`/api/v1/export?jobId=${selectedJob.id}&mode=stream`)}>
+              <Button variant="primary" onClick={() => window.open(`/api/v1/export?jobId=${selectedJob.id}&mode=stream&format=${exportFormat}`)}>
                 <TbDownload /> Download ZIP
               </Button>
             </div>
@@ -165,7 +175,7 @@ export const DeliverExport: React.FC<DeliverExportProps> = ({ jobs, selectedJob,
                 <div className="del-name">Share Download Link</div>
                 <div className="del-meta">Generate a signed, expiring URL</div>
               </div>
-              <Button variant="outline" onClick={onExportUrl}>
+              <Button variant="outline" onClick={() => onExportUrl(exportFormat)}>
                 <TbLink /> Share Link
               </Button>
             </div>

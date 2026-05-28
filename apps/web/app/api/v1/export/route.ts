@@ -6,6 +6,7 @@ import { createReadStream, existsSync } from 'fs';
 import { Readable } from 'stream';
 import crypto from 'crypto';
 import path from 'path';
+import sharp from 'sharp';
 
 // Helper to sign export tokens
 const SECRET = process.env.NEXTAUTH_SECRET || 'fallback-secret-for-chromacraft-export-token-signing';
@@ -46,6 +47,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const token = url.searchParams.get('token');
     const mode = url.searchParams.get('mode') || 'stream'; // stream or url
+    const format = url.searchParams.get('format') || 'png';
 
     let jobId: number | null = null;
 
@@ -97,7 +99,7 @@ export async function GET(req: NextRequest) {
     if (!token && mode === 'url') {
       const expiry = Number(process.env.EXPORT_URL_EXPIRY_SECONDS || '600') * 1000;
       const { token: signedToken } = generateSignedToken(jobId, expiry);
-      const downloadUrl = `${req.nextUrl.origin}/api/v1/export?token=${encodeURIComponent(signedToken)}`;
+      const downloadUrl = `${req.nextUrl.origin}/api/v1/export?token=${encodeURIComponent(signedToken)}&format=${format}`;
       return NextResponse.json({ success: true, url: downloadUrl });
     }
 
@@ -119,7 +121,31 @@ export async function GET(req: NextRequest) {
     // Add files to archive
     for (const asset of approvedAssets) {
       if (existsSync(asset.path)) {
-        archive.file(asset.path, { name: path.basename(asset.path) });
+        if (asset.type === 'video' || format === 'original') {
+          // Add as-is
+          archive.file(asset.path, { name: path.basename(asset.path) });
+        } else {
+          // Convert using sharp
+          try {
+            let s = sharp(asset.path);
+            if (format === 'jpeg' || format === 'jpg') {
+              s = s.jpeg({ quality: 90 });
+            } else if (format === 'webp') {
+              s = s.webp({ quality: 90 });
+            } else {
+              s = s.png();
+            }
+            const buffer = await s.toBuffer();
+            const originalName = path.basename(asset.path);
+            const baseName = path.parse(originalName).name;
+            const ext = format === 'jpeg' ? 'jpg' : format;
+            archive.append(buffer, { name: `${baseName}.${ext}` });
+          } catch (e) {
+            console.error(`Failed to convert ${asset.path}:`, e);
+            // Fallback to original
+            archive.file(asset.path, { name: path.basename(asset.path) });
+          }
+        }
       } else {
         console.warn(`File does not exist: ${asset.path}`);
       }

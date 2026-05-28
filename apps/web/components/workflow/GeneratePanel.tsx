@@ -5,8 +5,9 @@ import {
   TbLoader, TbCheck, TbAlertCircle, TbPalette, TbClock,
   TbChevronRight, TbInfoCircle, TbReload, TbFileCode, TbX, TbPhoto
 } from 'react-icons/tb';
+
 import { Button } from '../ui/Button';
-import type { Job, TabId } from '../shared/types';
+import type { Job, TabId, Provider } from '../shared/types';
 
 type GeneratePanelProps = {
   jobs: Job[];
@@ -14,7 +15,7 @@ type GeneratePanelProps = {
   onSelectJob: (job: Job) => void;
   promptText: string;
   onPromptChange: (v: string) => void;
-  providers: Array<{ id: number; name: string; default: boolean }>;
+  providers: Provider[];
   selectedProviderId: number | null;
   onSelectProvider: (id: number | null) => void;
   loading: boolean;
@@ -44,26 +45,24 @@ const SHADES: Record<string, string[]> = {
 };
 
 export const GeneratePanel: React.FC<GeneratePanelProps> = ({
-  jobs, selectedJob, onSelectJob, promptText, onPromptChange,
+  jobs = [], selectedJob, onSelectJob, promptText, onPromptChange,
   providers, selectedProviderId, onSelectProvider, loading, onStartGeneration, onNavigate
 }) => {
-  // Stepper state for generation panel
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
   const [activeGenStep, setActiveGenStep] = useState(0);
-
-  // Custom cell color modal state
   const [showColorModal, setShowColorModal] = useState(false);
   const [activeCellIdx, setActiveCellIdx] = useState<number | null>(null);
   const [activeCellName, setActiveCellName] = useState('');
   const [activeCellHex, setActiveCellHex] = useState('');
   const [cellColors, setCellColors] = useState<string[]>([]);
-
-  // Fix Modal state for Silver/failed color
   const [showFixModal, setShowFixModal] = useState(false);
   const [fixColorName, setFixColorName] = useState('');
   const [fixOption, setFixOption] = useState('Contrast Boost');
   const [reprocessing, setReprocessing] = useState(false);
 
-  // Lifestyle generation simulator state
+  // Hybrid generation state
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const [lifestyleSimStatus, setLifestyleSimStatus] = useState<'waiting' | 'generating' | 'done'>('waiting');
   const [lifestyleCards, setLifestyleCards] = useState([
     { id: 'lp1', label: 'Blue · rider · urban India', hex: '#2563eb', status: 'pending' },
@@ -71,7 +70,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
     { id: 'lp3', label: 'White · city · minimal', hex: '#f5f5f5', status: 'pending' }
   ]);
 
-  // Read configuration metadata from selected job
   const metadata = selectedJob?.generation?.metadata || {};
   const gridCols = metadata.cols || 4;
   const gridRows = metadata.rows || 3;
@@ -79,7 +77,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const configuredColors = metadata.colors || Object.keys(COLOR_HEX);
   const hasLifestyle = metadata.lifestyleEnabled || false;
 
-  // Sync cell colors state with job config
   useEffect(() => {
     if (configuredColors.length) {
       setCellColors(configuredColors.map((c: string) => COLOR_HEX[c] || c));
@@ -98,41 +95,68 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
     return matches.find(a => a.type === 'processed') || matches.find(a => a.type === 'variant') || null;
   };
 
-  // Auto-trigger lifestyle generation simulation once job variants are complete
   useEffect(() => {
     if (selectedJob && selectedJob.status !== 'PROCESSING' && selectedJob.status !== 'PENDING' && hasLifestyle && lifestyleSimStatus === 'waiting') {
       triggerLifestyleSimulation();
     }
   }, [selectedJob, hasLifestyle]);
 
-  // Derived assets
   const assets = selectedJob?.assets || [];
   const variantAssets = assets.filter(a => a.type === 'variant' || a.type === 'processed');
   const finishedCount = variantAssets.filter(a => a.status === 'done' || a.status === 'approved').length;
-
-  // Silver auto-fail simulation to match prototype "failed color check" flow
   const failedVariantIndex = configuredColors.findIndex((c: string) => c.toLowerCase() === 'silver');
-
-  // Progress calculations
   const progressPercent = totalVariants > 0 ? Math.round((finishedCount / totalVariants) * 100) : 0;
 
-  // Actions
+  // ----------------------------------------------------
+  // HYBRID GENERATION LOGIC (Puter.js + Backend)
+  // ----------------------------------------------------
+  const handleHybridGenerate = async () => {
+    if (!selectedJob) return;
+    setIsGenerating(true);
+
+    // Check if user has selected a valid provider API key (Paid) vs no provider (Free/Puter)
+    const selectedProvider = providers?.find((p) => p.id === selectedProviderId);
+    const hasApiKey = selectedProvider && !selectedProvider.name.toLowerCase().includes('mock');
+
+    try {
+      if (hasApiKey) {
+        console.log("API Key Provider selected. Using standard backend generation...");
+        const response = await fetch('/api/v1/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: selectedJob.id,
+            prompt: promptText,
+            providerId: selectedProviderId,
+            settings: { ...metadata, colors: configuredColors }
+          })
+        });
+        if (!response.ok) throw new Error("Backend generation failed");
+        onStartGeneration(); // Trigger parent refresh
+      } else {
+        alert("No AI Provider configured. Please configure your API Key in Profile Settings before starting generation.");
+        setIsGenerating(false);
+        return;
+      }
+    } catch (error) {
+      console.error("Generation Error:", error);
+      alert("Error in generating images. Check console.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const triggerLifestyleSimulation = () => {
     setLifestyleSimStatus('generating');
     setActiveGenStep(1);
-
-    // Simulate card by card progress
     lifestyleCards.forEach((card, index) => {
       setTimeout(() => {
         setLifestyleCards(prev => prev.map((c, i) => i === index ? { ...c, status: 'generating' } : c));
-
         setTimeout(() => {
           setLifestyleCards(prev => prev.map((c, i) => i === index ? { ...c, status: 'done' } : c));
         }, 1200);
-
       }, index * 800);
     });
-
     setTimeout(() => {
       setLifestyleSimStatus('done');
     }, 3200);
@@ -169,7 +193,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
     setTimeout(() => {
       setReprocessing(false);
       setShowFixModal(false);
-      // Simulate that the error was fixed
       if (selectedJob) {
         const silverAsset = selectedJob.assets?.find(a => a.path.toLowerCase().includes('silver'));
         if (silverAsset) {
@@ -179,7 +202,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
     }, 1500);
   };
 
-  // Colored car preview SVG generator matching prototype perfectly
   const renderCarSVG = (bodyColor: string, status: string) => {
     const glassC = 'rgba(180,220,255,0.7)';
     const wheelC = '#333';
@@ -203,14 +225,13 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 
   return (
     <div className="screen active">
-      {/* Target Job selection bar */}
       <div className="cost-bar" style={{ padding: '10px 14px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label style={{ fontSize: '11px', color: 'var(--tx3)' }}>Selected Generation Job:</label>
           <select
             value={selectedJob?.id || ''}
             onChange={(e) => {
-              const j = jobs.find((x) => x.id === Number(e.target.value));
+              const j = safeJobs.find((x) => x.id === Number(e.target.value));
               if (j) onSelectJob(j);
             }}
             style={{
@@ -219,7 +240,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             }}
           >
             <option value="">-- Select Active Job --</option>
-            {jobs.map((j) => (
+            {safeJobs.map((j) => (
               <option key={j.id} value={j.id}>{j.name} ({j.status})</option>
             ))}
           </select>
@@ -234,44 +255,72 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 
       {selectedJob ? (
         <div className="g3" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
-
-          {/* LEFT: Grid of variants & Progress details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-
-            {/* Realtime progress tracker card */}
             <div className="sq" style={{ padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <div>
                   <span
                     className={`badge ${selectedJob.status === 'PROCESSING' || selectedJob.status === 'PENDING'
-                        ? 'b-amber'
+                      ? 'b-amber'
+                      : selectedJob.status === 'FAILED'
+                        ? 'b-red'
                         : 'b-green'
                       }`}
                   >
                     {selectedJob.status === 'PROCESSING' || selectedJob.status === 'PENDING'
                       ? `Generating (${finishedCount}/${totalVariants})`
-                      : 'Complete'
+                      : selectedJob.status === 'FAILED'
+                        ? 'Failed'
+                        : 'Complete'
                     }
                   </span>
                   <span style={{ fontSize: '12px', color: 'var(--tx2)', marginLeft: '10px' }}>
                     {selectedJob.status === 'PROCESSING' || selectedJob.status === 'PENDING'
                       ? `${finishedCount}/${totalVariants} variants complete`
-                      : 'All variants generated successfully'
+                      : selectedJob.status === 'FAILED'
+                        ? 'Generation pipeline encountered errors'
+                        : 'All variants generated successfully'
                     }
                   </span>
                 </div>
-                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>
-                  Est. time: {selectedJob.status === 'PROCESSING' ? '~30s left' : 'Finished'}
-                </small>
+                {/* Generation Trigger Button if PENDING */}
+                {selectedJob.status === 'PENDING' && (
+                  <Button variant="primary" onClick={handleHybridGenerate} disabled={isGenerating}>
+                    {isGenerating ? <TbLoader className="spin" size={16} /> : 'Start Pipeline'}
+                  </Button>
+                )}
               </div>
 
-              {/* Progress bar */}
               <div className="progress-wrap">
                 <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
               </div>
+
+              {selectedJob.status === 'FAILED' && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '12px',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid var(--err)',
+                  borderRadius: '6px',
+                  color: 'var(--tx)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--err)', marginBottom: '6px' }}>
+                    <TbAlertCircle size={16} /> Pipeline Errors:
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px', listStyleType: 'disc' }}>
+                    {selectedJob.statusHistory && Array.isArray(selectedJob.statusHistory) && selectedJob.statusHistory.filter((h: any) => h.status.includes('FAIL') || h.status === 'FAILED').map((h: any, i: number) => (
+                      <li key={i}>
+                        <strong>{h.status}:</strong> {h.message}
+                      </li>
+                    ))}
+                    {(!selectedJob.statusHistory || !Array.isArray(selectedJob.statusHistory) || selectedJob.statusHistory.filter((h: any) => h.status.includes('FAIL') || h.status === 'FAILED').length === 0) && (
+                      <li>Unknown error occurred. Please check database logs.</li>
+                    )}
+                  </ul>
+                </div>
+              )}
             </div>
 
-            {/* VARIANT GRID CONTAINER */}
             <div
               id="variant-grid"
               style={{
@@ -282,8 +331,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             >
               {configuredColors.map((colName, idx) => {
                 const colorHex = cellColors[idx] || COLOR_HEX[colName] || '#999';
-                const isFailed = failedVariantIndex === idx && selectedJob.status !== 'PROCESSING';
-                const isFinished = finishedCount > idx || selectedJob.status !== 'PROCESSING';
+                const isFailed = selectedJob.statusHistory && Array.isArray(selectedJob.statusHistory) && selectedJob.statusHistory.some((h: any) => h.status === 'COLOR_FAILED' && h.message.toLowerCase().includes(colName.toLowerCase()));
+                const variantAsset = getVariantAsset(colName);
+                const isFinished = !!variantAsset && (variantAsset.status === 'done' || variantAsset.status === 'approved' || variantAsset.status === 'pending');
 
                 return (
                   <div
@@ -316,7 +366,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                       </div>
                     </div>
 
-                    {/* Palette picker trigger */}
                     <button
                       className="vc-color-btn"
                       onClick={(e) => handleOpenColorPicker(e, idx, colName, colorHex)}
@@ -325,7 +374,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                       <TbPalette size={13} />
                     </button>
 
-                    {/* Fix modal button */}
                     {isFailed && (
                       <div className="vc-fix-btn" onClick={() => handleOpenFixModal(colName)}>
                         Fix
@@ -336,7 +384,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
               })}
             </div>
 
-            {/* Approve grid & continue lifestyle row */}
             {selectedJob.status !== 'PROCESSING' && selectedJob.status !== 'PENDING' && hasLifestyle && lifestyleSimStatus === 'waiting' && (
               <div id="grid-approve-row" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
                 <Button variant="primary" onClick={triggerLifestyleSimulation}>
@@ -346,10 +393,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             )}
           </div>
 
-          {/* RIGHT: Pipeline add-ons and logs */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-
-            {/* LIFESTYLE PIPELINE PREVIEWS */}
             <div
               id="life-gen-card"
               className={`card ${!hasLifestyle ? 'muted dashed' : ''}`}
@@ -360,7 +404,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 {hasLifestyle ? (
                   <span
                     className={`badge ${lifestyleSimStatus === 'generating' ? 'b-amber' :
-                        lifestyleSimStatus === 'done' ? 'b-green' : 'b-gray'
+                      lifestyleSimStatus === 'done' ? 'b-green' : 'b-gray'
                       }`}
                   >
                     {lifestyleSimStatus === 'generating' ? 'Generating…' :
@@ -405,7 +449,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
               )}
             </div>
 
-            {/* TECHNICAL GENERATION LOGS */}
             <div className="card" style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', borderBottom: '1px solid var(--bd)', paddingBottom: '6px' }}>
                 <TbFileCode size={16} style={{ color: 'var(--acc)' }} />
@@ -448,7 +491,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
               </div>
             </div>
           </div>
-
         </div>
       ) : (
         <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
@@ -457,7 +499,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         </div>
       )}
 
-      {/* ── MODAL: CELL COLOR SHADE SELECTOR ── */}
       <div className={`overlay ${showColorModal ? 'open' : ''}`}>
         <div className="modal" style={{ width: '400px' }}>
           <button className="modal-close" onClick={() => setShowColorModal(false)}>
@@ -468,7 +509,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
           </div>
           <div className="modal-sub">Choose a base catalog color or select custom paint shades.</div>
 
-          {/* Main colors swatches */}
           <div className="sq-label" style={{ fontSize: '11px' }}>Base Catalog Finishes</div>
           <div id="ccp-main-swatches" className="ccp-swatches" style={{ marginBottom: '12px' }}>
             {Object.keys(COLOR_HEX).map(name => {
@@ -489,7 +529,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             })}
           </div>
 
-          {/* Sub shades */}
           <div className="sq-label" style={{ fontSize: '11px' }}>Select Premium Paint Shade</div>
           <div className="shade-sub" style={{ marginBottom: '16px' }}>
             {(SHADES[activeCellName] || []).map(shadeHex => {
@@ -505,7 +544,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             })}
           </div>
 
-          {/* Custom Hex selector */}
           <div className="field">
             <label style={{ fontSize: '11px' }}>Custom Finishes Hex</label>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -534,7 +572,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         </div>
       </div>
 
-      {/* ── MODAL: failed color fix options ── */}
       <div className={`overlay ${showFixModal ? 'open' : ''}`}>
         <div className="modal" style={{ width: '420px' }}>
           <button className="modal-close" onClick={() => setShowFixModal(false)}>
@@ -585,7 +622,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         </div>
       </div>
 
-      {/* Review All button (TC_GENERATE_004) */}
       {selectedJob && selectedJob.status !== 'PROCESSING' && selectedJob.status !== 'PENDING' && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
           <Button variant="primary" onClick={() => onNavigate?.('review')}>

@@ -6,6 +6,7 @@ export type Job = {
   status: 'PENDING' | 'PROCESSING' | 'QA_PENDING' | 'COMPLETED' | 'FAILED';
   createdAt: string;
   updatedAt: string;
+  statusHistory?: any;
   assets?: Asset[];
   generation?: {
     id: number;

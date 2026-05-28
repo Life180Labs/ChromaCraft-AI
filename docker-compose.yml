@@ -37,6 +37,7 @@ services:
       - NEXTAUTH_URL=http://localhost:3000
       - NEXTAUTH_SECRET=supersecretkey
       - DEVELOPMENT_MODE=true
+      - STORAGE_PATH=/app/storage
     ports:
       - "3000:3000"
     depends_on:

@@ -40,7 +40,8 @@ const DEFAULT_PROMPTS: SavedPrompt[] = [
   },
 ];
 
-export const JobHistory: React.FC<JobHistoryProps> = ({ jobs, onRefresh, onSelectJob }) => {
+export const JobHistory: React.FC<JobHistoryProps> = ({ jobs = [], onRefresh, onSelectJob }) => {
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>(DEFAULT_PROMPTS);
   const [showNewPrompt, setShowNewPrompt] = useState(false);
   const [newPromptName, setNewPromptName] = useState('');
@@ -72,10 +73,10 @@ export const JobHistory: React.FC<JobHistoryProps> = ({ jobs, onRefresh, onSelec
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
           <Button variant="ghost" onClick={onRefresh}><TbRefresh /> Refresh</Button>
         </div>
-        {jobs.length === 0 ? (
+        {safeJobs.length === 0 ? (
           <p style={{ color: 'var(--tx3)', fontSize: 12 }}>No jobs yet.</p>
         ) : (
-          jobs.map((job) => (
+          safeJobs.map((job) => (
             <div key={job.id} className="job-row" onClick={() => onSelectJob(job)}>
               <div className="job-ico"><TbHistory /></div>
               <div className="job-info">

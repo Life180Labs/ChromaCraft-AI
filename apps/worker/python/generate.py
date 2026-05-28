@@ -154,15 +154,18 @@ def recolor_reference(
     target_rgb = name_to_rgb(target_color_name)
     t_h, t_s, t_l = rgb_to_hsl(*target_rgb)
 
-    # Load + remove background
+    # Load original image and scale to target size
     src = Image.open(ref_path).convert("RGBA")
-    fg = _rembg_remove(src)
+    src.thumbnail(image_size, Image.Resampling.LANCZOS)
+    
+    # Create base canvas with the original image centered
+    base_canvas = Image.new("RGBA", image_size, (255, 255, 255, 255))
+    offset = ((image_size[0] - src.width) // 2, (image_size[1] - src.height) // 2)
+    base_canvas.paste(src, offset, src)
 
-    # Resize keeping aspect ratio, pad to target size
-    fg.thumbnail(image_size, Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", image_size, (0, 0, 0, 0))
-    offset = ((image_size[0] - fg.width) // 2, (image_size[1] - fg.height) // 2)
-    canvas.paste(fg, offset, fg)
+    # Remove background to isolate the car body
+    fg = _rembg_remove(base_canvas)
+    canvas = fg
 
     r_arr, g_arr, b_arr, a_arr = canvas.split()
     r_data = list(r_arr.getdata())
@@ -234,7 +237,7 @@ def recolor_reference(
     shadow_rgba.putalpha(a_layer)
 
     # Studio background
-    background = _make_studio_background(image_size, bg_color)
+    background = _make_studio_background(image_size, bg_color=(255, 255, 255))
     background.paste(shadow_rgba, (4, 8), shadow_rgba)  # shadow offset
     background.paste(recolored, (0, 0), recolored)
 
@@ -471,6 +474,8 @@ def _build_openai_prompt(
                             "Describe this product in detail for a text-to-image prompt: "
                             "exact make/model, body style, wheel design, grille shape, "
                             "headlight style, and any distinguishing features. "
+                            "CRITICAL: Do NOT mention the current paint color of the vehicle. "
+                            "Ignore the color entirely. Focus only on physical structure and features. "
                             "Keep the description under 100 words. Output only the description."
                         )},
                         {"type": "image_url", "image_url": {
@@ -490,9 +495,10 @@ def _build_openai_prompt(
 
     color_prompt = re.sub(r"\[color\]", color, base_prompt, flags=re.IGNORECASE)
     return (
-        f"{color_prompt}. "
+        f"A photorealistic product catalog image of a {color.upper()} colored vehicle. "
+        f"The vehicle's exterior paint MUST be exclusively {color.upper()}. "
         f"Exact model: {description}. "
-        f"Paint color: {color}. "
+        f"{color_prompt}. "
         "Professional automotive catalog photograph. "
         "Pure white studio background. Front-right three-quarter view. "
         "Soft diffused lighting, subtle reflections. No text, no people."
@@ -509,9 +515,10 @@ def generate_stability_image(
     image_size: tuple[int, int] = (800, 600),
 ) -> str:
     color_prompt = (
+        f"A photorealistic product catalog image of a {color.upper()} colored vehicle. "
+        f"The vehicle's exterior paint MUST be exclusively {color.upper()}. "
         f"{re.sub(r'[[]color[]]', color, prompt, flags=re.IGNORECASE)}. "
-        f"Vehicle paint color: {color}. "
-        "Photorealistic product catalog. White background. Studio lighting."
+        "White background. Studio lighting."
     )
 
     # Use img2img if reference available
@@ -527,7 +534,7 @@ def generate_stability_image(
                 "text_prompts[0][weight]": "1",
                 "text_prompts[1][text]": "watermark, text, blurry, low quality",
                 "text_prompts[1][weight]": "-1",
-                "image_strength": "0.45",
+                "image_strength": "0.10",
                 "cfg_scale": "7",
                 "samples": "1",
                 "steps": "40",

@@ -206,496 +206,486 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
   };
 
   return (
-    <div className="screen active">
-      {/* Wizard Header Stepper */}
+    <div className="screen active" style={{ maxWidth: '800px', margin: '0 auto' }}>
+      {/* High-level Stepper */}
       <div className="stepper-wrap" style={{ marginBottom: '24px' }}>
-        <div className="stepper" style={{ display: 'flex', justifyContent: 'space-between', position: 'relative' }}>
-          {STEP_NAMES.map((name, idx) => (
-            <div 
-              key={name} 
-              className={`step-item ${idx === activeStep ? 'active' : ''} ${idx < activeStep ? 'done' : ''}`}
-              style={{ flex: 1, textAlign: 'center', cursor: idx < activeStep ? 'pointer' : 'default' }}
-              onClick={() => idx < activeStep && setActiveStep(idx)}
-            >
-              <div 
-                className="step-circle" 
-                style={{ 
-                  width: '28px', height: '28px', borderRadius: '50%', 
-                  margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: idx === activeStep ? 'var(--acc)' : idx < activeStep ? 'var(--acc-bg)' : 'var(--bg3)',
-                  color: idx === activeStep ? '#fff' : idx < activeStep ? 'var(--acc-tx)' : 'var(--tx3)',
-                  fontWeight: 600, fontSize: '12px', border: '1px solid var(--bd)'
-                }}
-              >
-                {idx < activeStep ? <TbCheck size={14} /> : idx + 1}
-              </div>
-              <span style={{ fontSize: '11px', fontWeight: idx === activeStep ? 600 : 400, color: idx === activeStep ? 'var(--tx)' : 'var(--tx3)' }}>
-                {name}
-              </span>
-            </div>
-          ))}
+        <div className="stepper" style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', maxWidth: '500px', margin: '0 auto' }}>
+          {/* Step 1: Configure */}
+          <div className="step-item active" style={{ flex: 1, textAlign: 'center' }}>
+            <div className="step-circle" style={{
+              width: '28px', height: '28px', borderRadius: '50%',
+              margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--acc)', color: '#fff', fontWeight: 600, fontSize: '12px', border: '1px solid var(--bd)'
+            }}>1</div>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)' }}>Configure</span>
+          </div>
+          {/* Line */}
+          <div style={{ flex: 1, height: '2px', background: 'var(--bd)', alignSelf: 'center', margin: '0 -20px 14px' }}></div>
+          {/* Step 2: Prompt */}
+          <div className="step-item" style={{ flex: 1, textAlign: 'center' }}>
+            <div className="step-circle" style={{
+              width: '28px', height: '28px', borderRadius: '50%',
+              margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--bg3)', color: 'var(--tx3)', fontWeight: 600, fontSize: '12px', border: '1px solid var(--bd)'
+            }}>2</div>
+            <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--tx3)' }}>Prompt</span>
+          </div>
+          {/* Line */}
+          <div style={{ flex: 1, height: '2px', background: 'var(--bd)', alignSelf: 'center', margin: '0 -20px 14px' }}></div>
+          {/* Step 3: Generate */}
+          <div className="step-item" style={{ flex: 1, textAlign: 'center' }}>
+            <div className="step-circle" style={{
+              width: '28px', height: '28px', borderRadius: '50%',
+              margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--bg3)', color: 'var(--tx3)', fontWeight: 600, fontSize: '12px', border: '1px solid var(--bd)'
+            }}>3</div>
+            <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--tx3)' }}>Generate</span>
+          </div>
         </div>
       </div>
 
-      {/* Main Wizard Form container */}
-      <div className="card" style={{ padding: '24px', minHeight: '360px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-        
-        {/* Step Content Wrapper */}
-        <div style={{ flex: 1 }}>
-
-          {/* STEP 1: DOMAIN FOCUS */}
-          {activeStep === 0 && (
-            <div>
-              <h3 className="modal-title" style={{ fontSize: '18px', marginBottom: '8px' }}>Select Industry/Domain</h3>
-              <p style={{ fontSize: '12px', color: 'var(--tx3)', marginBottom: '20px' }}>
-                Tailor the underlying AI layout generation pipelines for domain-specific parameters.
-              </p>
-              <div className="cloud-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                {INDUSTRIES.map(ind => {
-                  const Icon = ind.icon;
-                  const isSel = industry === ind.id;
-                  return (
-                    <div 
-                      key={ind.id} 
-                      className={`cloud-opt ${isSel ? 'sel' : ''}`} 
-                      style={{ 
-                        border: isSel ? '2px solid var(--acc)' : '1px solid var(--bd)',
-                        background: isSel ? 'var(--acc-bg)' : 'var(--bg2)',
-                        padding: '16px', borderRadius: 'var(--r-lg)', textAlign: 'center', cursor: 'pointer'
-                      }}
-                      onClick={() => {
-                        onIndustryChange(ind.id);
-                        handleNext();
-                      }}
-                    >
-                      <Icon size={28} style={{ color: isSel ? 'var(--acc)' : 'var(--tx3)', marginBottom: '8px' }} />
-                      <span style={{ fontWeight: 500, fontSize: '13px', color: 'var(--tx)' }}>{ind.name}</span>
-                      <small style={{ fontSize: '10px', color: 'var(--tx3)', marginTop: '4px', display: 'block', lineHeight: 1.3 }}>{ind.desc}</small>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 2: TARGETING CONTEXT */}
-          {activeStep === 1 && (
-            <div>
-              <h3 className="modal-title" style={{ fontSize: '18px', marginBottom: '8px' }}>Targeting & Positioning</h3>
-              <p style={{ fontSize: '12px', color: 'var(--tx3)', marginBottom: '16px' }}>
-                Configure marketing context settings to refine catalog generation outputs.
-              </p>
-
-              {/* Who is this for? */}
-              <div className="sq">
-                <div className="sq-label">Who is this for? (Audience)</div>
-                <div className="sq-opts">
-                  {TARGET_WHO.map(opt => (
-                    <div 
-                      key={opt} 
-                      className={`sq-opt ${targetAudience === opt ? 'sel' : ''}`}
-                      onClick={() => onTargetAudienceChange(opt)}
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Target market */}
-              <div className="sq">
-                <div className="sq-label">Target Market (Geography)</div>
-                <div className="sq-opts">
-                  {TARGET_MARKETS.map(opt => (
-                    <div 
-                      key={opt} 
-                      className={`sq-opt ${targetMarket === opt ? 'sel' : ''}`}
-                      onClick={() => onTargetMarketChange(opt)}
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Purpose / Use */}
-              <div className="sq">
-                <div className="sq-label">Intent / Purpose</div>
-                <div className="sq-opts">
-                  {TARGET_PURPOSES.map(opt => (
-                    <div 
-                      key={opt} 
-                      className={`sq-opt ${targetPurpose === opt ? 'sel' : ''}`}
-                      onClick={() => onTargetPurposeChange(opt)}
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: OUTPUT SPECIFICATION */}
-          {activeStep === 2 && (
-            <div>
-              <h3 className="modal-title" style={{ fontSize: '18px', marginBottom: '8px' }}>Output Specifications</h3>
-              <p style={{ fontSize: '12px', color: 'var(--tx3)', marginBottom: '16px' }}>
-                Specify variation grid dimensions and select premium post-processing pipelines.
-              </p>
-
-              <div className="g2" style={{ gap: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-                {/* Column 1: Grid Dimensions */}
-                <div className="sq" style={{ padding: '16px' }}>
-                  <div className="sq-label" style={{ marginBottom: '12px' }}>Color Variant Grid Size</div>
-                  <div className="grid-editor">
-                    <div className="dim-ctrl">
-                      <label>Cols</label>
-                      <button className="dim-btn" onClick={() => handleGridAdjust('cols', -1)}>-</button>
-                      <span className="dim-val">{gridCols}</span>
-                      <button className="dim-btn" onClick={() => handleGridAdjust('cols', 1)}>+</button>
-                    </div>
-                    <div className="dim-ctrl">
-                      <label>Rows</label>
-                      <button className="dim-btn" onClick={() => handleGridAdjust('rows', -1)}>-</button>
-                      <span className="dim-val">{gridRows}</span>
-                      <button className="dim-btn" onClick={() => handleGridAdjust('rows', 1)}>+</button>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div 
-                      id="grid-mini" 
-                      className="grid-mini"
-                      style={{ 
-                        gridTemplateColumns: `repeat(${gridCols}, 11px)`, 
-                        background: 'var(--bg)', border: '1px solid var(--bd)', padding: '6px', borderRadius: '4px' 
-                      }}
-                    >
-                      {Array.from({ length: totalVariants }).map((_, idx) => {
-                        const curColor = customColors[idx] || UC1_STANDARD_COLORS[idx % UC1_STANDARD_COLORS.length];
-                        const bgStyle = COLOR_HEX[curColor] || curColor;
-                        return (
-                          <div key={idx} className="grid-mini-cell" style={{ background: bgStyle }} />
-                        );
-                      })}
-                    </div>
-                    <div>
-                      <small id="grid-desc" style={{ display: 'block', fontSize: '11px', color: 'var(--tx2)', fontWeight: 500 }}>
-                        {gridCols} cols × {gridRows} rows = {totalVariants} variants
-                      </small>
-                      <small style={{ fontSize: '10px', color: 'var(--tx3)' }}>
-                        Creates {totalVariants} high-res catalog images
-                      </small>
-                    </div>
-                  </div>
-
-                  {/* Configure Individual Colors */}
-                  <div style={{ marginTop: '16px', borderTop: '1px solid var(--bd)', paddingTop: '12px' }}>
-                    <div className="sq-label" style={{ marginBottom: '8px', fontSize: '12px' }}>Configure Variant Colors</div>
-                    <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
-                      {Array.from({ length: totalVariants }).map((_, idx) => {
-                        const currentColor = customColors[idx] || UC1_STANDARD_COLORS[idx % UC1_STANDARD_COLORS.length];
-                        const isPreset = UC1_STANDARD_COLORS.includes(currentColor);
-                        
-                        return (
-                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '11px', minWidth: '40px', color: 'var(--tx2)' }}>Var {idx + 1}:</span>
-                            
-                            {/* Color indicator */}
-                            <div 
-                              style={{ 
-                                width: '16px', height: '16px', borderRadius: '3px', 
-                                background: COLOR_HEX[currentColor] || currentColor, 
-                                border: '1px solid var(--bd)' 
-                              }} 
-                            />
-                            
-                            {/* Preset color selector */}
-                            <select
-                              value={isPreset ? currentColor : 'custom'}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                const updated = [...customColors];
-                                if (val === 'custom') {
-                                  updated[idx] = '#2563eb'; // Default to blue hex
-                                } else {
-                                  updated[idx] = val;
-                                }
-                                onCustomColorsChange(updated);
-                              }}
-                              style={{ 
-                                background: 'var(--bg)', border: '1px solid var(--bd)', 
-                                borderRadius: '4px', padding: '2px 4px', fontSize: '11px', color: 'var(--tx)',
-                                flex: 1, height: '24px'
-                              }}
-                            >
-                              {UC1_STANDARD_COLORS.map(c => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                              <option value="custom">Custom (Hex)...</option>
-                            </select>
-
-                            {/* Hex input if custom */}
-                            {!isPreset && (
-                              <input
-                                type="text"
-                                value={currentColor}
-                                onChange={(e) => {
-                                  const updated = [...customColors];
-                                  updated[idx] = e.target.value;
-                                  onCustomColorsChange(updated);
-                                }}
-                                placeholder="#ffffff"
-                                style={{
-                                  width: '70px',
-                                  background: 'var(--bg)',
-                                  border: '1px solid var(--bd)',
-                                  borderRadius: '4px',
-                                  padding: '2px 4px',
-                                  fontSize: '11px',
-                                  color: 'var(--tx)',
-                                  height: '24px'
-                                }}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Column 2: Pipelines */}
-                <div className="sq" style={{ padding: '16px' }}>
-                  <div className="sq-label" style={{ marginBottom: '12px' }}>Workflow Pipeline Steps</div>
-                  
-                  {/* Step Row: Color Variants */}
-                  <div className="step-row">
-                    <div className="step-ico on"><TbPalette size={16} /></div>
-                    <div className="step-info">
-                      <div className="step-name">Color Variants</div>
-                      <div className="step-desc">Custom paint finishes mapping</div>
-                    </div>
-                    <span className="step-cost">Base</span>
-                  </div>
-
-                  {/* Step Row: Background Removal */}
-                  <div className="step-row">
-                    <div className="step-ico on"><TbSettings size={16} /></div>
-                    <div className="step-info">
-                      <div className="step-name">Background Removal</div>
-                      <div className="step-desc">Output transparent alpha mask</div>
-                    </div>
-                    <span className="step-cost" style={{ color: 'var(--suc)' }}>Free</span>
-                  </div>
-
-                  {/* Step Row: Lifestyle Scenes */}
-                  <div className="step-row">
-                    <div className="step-ico on"><TbUpload size={16} /></div>
-                    <div className="step-info">
-                      <div className="step-name">Lifestyle Placement</div>
-                      <div className="step-desc">AI dynamic scene integration</div>
-                    </div>
-                    <button 
-                      type="button" 
-                      className={`toggle ${lifestyleEnabled ? 'on' : 'off'}`} 
-                      onClick={() => onLifestyleChange(!lifestyleEnabled)} 
-                    />
-                  </div>
-
-                  {/* Step Row: Spin 360 */}
-                  <div className="step-row">
-                    <div className="step-ico on"><TbRefresh size={16} style={{ animation: spinEnabled ? 'spin 3s linear infinite' : 'none' }} /></div>
-                    <div className="step-info">
-                      <div className="step-name">Spin 360 Video</div>
-                      <div className="step-desc">Generate 360° interactive preview</div>
-                    </div>
-                    <button 
-                      type="button" 
-                      className={`toggle ${spinEnabled ? 'on' : 'off'}`} 
-                      onClick={() => onSpinChange(!spinEnabled)} 
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Cost bar summary */}
-              <div className="cost-bar" style={{ marginTop: '16px' }}>
-                <div className="ci">Base specs: <strong>${baseCost.toFixed(2)}</strong></div>
-                {(lifestyleEnabled || videoEnabled || spinEnabled || cropsEnabled) && (
-                  <div className="ci">Add-ons: <strong>${(lifestyleCost + videoCost + spinCost + cropsCost).toFixed(2)}</strong></div>
-                )}
-                <div className="ci total">Est. Cost: <strong>${totalCost.toFixed(2)}</strong></div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 4: PROMPT & REFERENCE */}
-          {activeStep === 3 && (
-            <div>
-              <h3 className="modal-title" style={{ fontSize: '18px', marginBottom: '8px' }}>Prompting & Reference</h3>
-              <p style={{ fontSize: '12px', color: 'var(--tx3)', marginBottom: '16px' }}>
-                Define product naming metadata, upload reference file, and customize target prompts.
-              </p>
-
-              <div className="g2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                {/* Reference upload & Names */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div className="field">
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)' }}>Product / Model Name</label>
-                    <Input 
-                      placeholder="e.g. Mitsubishi ASX" 
-                      value={modelName} 
-                      onChange={(e) => {
-                        onModelNameChange(e.target.value);
-                        onFilenamePrefixChange(e.target.value.replace(/\s+/g, '_'));
-                      }} 
-                      required 
-                    />
-                  </div>
-
-                  <div className="field">
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)' }}>Output Filename Prefix</label>
-                    <Input 
-                      placeholder="e.g. Mitsubishi_ASX" 
-                      value={filenamePrefix} 
-                      onChange={(e) => onFilenamePrefixChange(e.target.value.replace(/\s+/g, '_'))} 
-                    />
-                  </div>
-
-                  <div className="field">
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)' }}>Reference File Asset</label>
-                    <div 
-                      className={`drop-zone ${uploadFile || mockUploadMsg ? 'done' : ''}`}
-                      onClick={() => setShowUploadModal(true)}
-                      style={{ padding: '20px 12px' }}
-                    >
-                      <TbUpload size={22} style={{ margin: '0 auto 6px', color: 'var(--tx3)' }} />
-                      <p style={{ fontSize: '11px', color: 'var(--tx2)' }}>
-                        {uploadFile ? uploadFile.name : mockUploadMsg ? mockUploadMsg : 'Add reference image (Device/Cloud)'}
-                      </p>
-                      <small style={{ fontSize: '9px', color: 'var(--tx3)' }}>PNG, JPG up to 10MB</small>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Prompt display */}
-                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div className="field" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)' }}>Base Prompt Template</label>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button type="button" className="info-btn" onClick={() => setShowPromptLibrary(true)} style={{ width: 'auto', height: 'auto', borderRadius: '4px', padding: '2px 6px', border: '1px solid var(--bd2)' }}>
-                          <TbBook size={11} style={{ marginRight: '3px', verticalAlign: 'middle' }} /> Library
-                        </button>
-                        <button type="button" className="info-btn" onClick={() => { setEditorText(promptText); setShowPromptEditor(true); }} style={{ width: 'auto', height: 'auto', borderRadius: '4px', padding: '2px 6px', border: '1px solid var(--bd2)' }}>
-                          <TbPalette size={11} style={{ marginRight: '3px', verticalAlign: 'middle' }} /> Custom
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="prompt-box" style={{ flex: 1, fontSize: '10px', whiteSpace: 'pre-wrap', maxHeight: '180px', overflowY: 'auto' }}>
-                      {promptText}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 5: FINAL CONFIRMATION */}
-          {activeStep === 4 && (
-            <div>
-              <h3 className="modal-title" style={{ fontSize: '18px', marginBottom: '8px' }}>Confirm Setup Specification</h3>
-              <p style={{ fontSize: '12px', color: 'var(--tx3)', marginBottom: '16px' }}>
-                Review all configuration metadata prior to starting generation.
-              </p>
-
-              <div className="sq" style={{ padding: '16px', background: 'var(--bg2)' }}>
-                <table className="cost-tbl">
-                  <tbody>
-                    <tr>
-                      <td style={{ fontWeight: 600, width: '150px' }}>Industry Domain</td>
-                      <td>{industry}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ fontWeight: 600 }}>Model / Name</td>
-                      <td>{modelName || 'Mitsubishi ASX'}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ fontWeight: 600 }}>Prefix</td>
-                      <td>{filenamePrefix || (modelName ? modelName.replace(/\s+/g, '_') : 'unspecified')}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ fontWeight: 600 }}>Target Market</td>
-                      <td>{targetMarket}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ fontWeight: 600 }}>Target Audience</td>
-                      <td>{targetAudience}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ fontWeight: 600 }}>Output Variations</td>
-                      <td>{gridCols} columns × {gridRows} rows = {totalVariants} image finishes</td>
-                    </tr>
-                    <tr>
-                      <td style={{ fontWeight: 600 }}>Workflow Steps</td>
-                      <td>
-                        Variants (on) · Background Removal (on) 
-                        {lifestyleEnabled ? ' · Lifestyle Integration (on)' : ''}
-                        {spinEnabled ? ' · Interactive 360 Spin (on)' : ''}
-                      </td>
-                    </tr>
-                    <tr className="us">
-                      <td style={{ fontWeight: 600 }}>Estimated Costs</td>
-                      <td style={{ color: 'var(--acc2)' }}>${totalCost.toFixed(2)} credits</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {uploadError && <div className="notice err" style={{ marginBottom: '10px' }}>{uploadError}</div>}
-            </div>
-          )}
-
+      {/* STEP 1: INDUSTRY */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: 600, color: 'var(--tx3)', letterSpacing: '0.05em', marginBottom: '10px' }}>
+          STEP 1 – INDUSTRY
         </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+          {INDUSTRIES.map(ind => {
+            const Icon = ind.icon;
+            const isSel = industry === ind.id;
+            return (
+              <button
+                key={ind.id}
+                type="button"
+                className={`cloud-opt ${isSel ? 'sel' : ''}`}
+                style={{
+                  border: isSel ? '2px solid var(--acc)' : '1px solid var(--bd)',
+                  background: isSel ? 'var(--acc-bg)' : 'var(--bg2)',
+                  padding: '16px 8px',
+                  borderRadius: 'var(--r-lg)',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => onIndustryChange(ind.id)}
+              >
+                <Icon size={22} style={{ color: isSel ? 'var(--acc)' : 'var(--tx3)' }} />
+                <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>{ind.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-        {/* Wizard Footer Navigation */}
-        <div className="btn-row" style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--bd)', paddingTop: '16px', marginTop: '16px' }}>
-          <Button 
-            type="button" 
-            variant="outline" 
-            onClick={handleBack} 
-            disabled={activeStep === 0 || loading}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+      {/* STEP 2: PRODUCT IMAGE */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: 600, color: 'var(--tx3)', letterSpacing: '0.05em', marginBottom: '10px' }}>
+          STEP 2 – PRODUCT IMAGE
+        </div>
+        <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div 
+            className={`drop-zone ${uploadFile || mockUploadMsg ? 'done' : ''}`}
+            onClick={() => setShowUploadModal(true)}
+            style={{ padding: '30px 20px', border: '2px dashed var(--bd)', borderRadius: 'var(--r-lg)', textAlign: 'center', cursor: 'pointer', background: 'var(--bg)' }}
           >
-            <TbChevronLeft size={16} /> Back
-          </Button>
+            <TbUpload size={32} style={{ margin: '0 auto 8px', color: 'var(--tx3)' }} />
+            <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--tx)' }}>
+              {uploadFile ? uploadFile.name : mockUploadMsg ? mockUploadMsg : 'Click to upload – device, URL, or cloud'}
+            </p>
+            <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>PNG - JPG - min 800x600 - or product page URL</small>
+          </div>
 
-          {activeStep < STEP_NAMES.length - 1 ? (
-            <Button 
-              type="button" 
-              variant="primary" 
-              onClick={handleNext}
-              disabled={activeStep === 3 && !uploadFile && !mockUploadMsg}
-              style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              Next <TbChevronRight size={16} />
-            </Button>
-          ) : (
-            <Button 
-              type="button" 
-              variant="primary" 
-              onClick={onSubmit}
-              disabled={loading || (!uploadFile && !mockUploadMsg)}
-              style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--suc)', borderColor: 'var(--suc)', color: '#fff' }}
-            >
-              {loading ? 'Processing...' : 'Confirm & Start Generation'} <TbArrowRight size={16} />
-            </Button>
-          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="field">
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)', marginBottom: '6px', display: 'block' }}>Product / model name</label>
+              <Input 
+                placeholder="Mitsubishi ASX" 
+                value={modelName} 
+                onChange={(e) => {
+                  onModelNameChange(e.target.value);
+                  onFilenamePrefixChange(e.target.value.replace(/\s+/g, '_'));
+                }} 
+                required 
+              />
+            </div>
+            <div className="field">
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)', marginBottom: '6px', display: 'block' }}>Original filename prefix</label>
+              <Input 
+                placeholder="Mitsubishi_ASX" 
+                value={filenamePrefix} 
+                onChange={(e) => onFilenamePrefixChange(e.target.value.replace(/\s+/g, '_'))} 
+              />
+            </div>
+          </div>
         </div>
+      </div>
 
+      {/* STEP 3: TARGETING */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: 600, color: 'var(--tx3)', letterSpacing: '0.05em', marginBottom: '10px' }}>
+          STEP 3 – TARGETING
+        </div>
+        <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Who is this for? */}
+          <div className="sq" style={{ margin: 0 }}>
+            <div className="sq-label" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)', marginBottom: '8px' }}>Who is this for?</div>
+            <div className="sq-opts" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {TARGET_WHO.map(opt => (
+                <button 
+                  type="button"
+                  key={opt} 
+                  className={`sq-opt ${targetAudience === opt ? 'sel' : ''}`}
+                  style={{
+                    padding: '6px 14px', borderRadius: '20px', fontSize: '11px', fontWeight: 500,
+                    border: '1px solid var(--bd)', background: targetAudience === opt ? 'var(--acc)' : 'var(--bg2)',
+                    color: targetAudience === opt ? '#fff' : 'var(--tx2)', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  onClick={() => onTargetAudienceChange(opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Target market */}
+          <div className="sq" style={{ margin: 0 }}>
+            <div className="sq-label" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)', marginBottom: '8px' }}>Target market</div>
+            <div className="sq-opts" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {TARGET_MARKETS.map(opt => (
+                <button 
+                  type="button"
+                  key={opt} 
+                  className={`sq-opt ${targetMarket === opt ? 'sel' : ''}`}
+                  style={{
+                    padding: '6px 14px', borderRadius: '20px', fontSize: '11px', fontWeight: 500,
+                    border: '1px solid var(--bd)', background: targetMarket === opt ? 'var(--acc)' : 'var(--bg2)',
+                    color: targetMarket === opt ? '#fff' : 'var(--tx2)', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  onClick={() => onTargetMarketChange(opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Purpose / Use */}
+          <div className="sq" style={{ margin: 0 }}>
+            <div className="sq-label" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)', marginBottom: '8px' }}>Purpose</div>
+            <div className="sq-opts" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {TARGET_PURPOSES.map(opt => (
+                <button 
+                  type="button"
+                  key={opt} 
+                  className={`sq-opt ${targetPurpose === opt ? 'sel' : ''}`}
+                  style={{
+                    padding: '6px 14px', borderRadius: '20px', fontSize: '11px', fontWeight: 500,
+                    border: '1px solid var(--bd)', background: targetPurpose === opt ? 'var(--acc)' : 'var(--bg2)',
+                    color: targetPurpose === opt ? '#fff' : 'var(--tx2)', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  onClick={() => onTargetPurposeChange(opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* STEP 4: OUTPUT STEPS */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <div style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: 600, color: 'var(--tx3)', letterSpacing: '0.05em' }}>
+            STEP 4 – OUTPUT STEPS
+          </div>
+          <button type="button" style={{ fontSize: '9px', fontWeight: 600, color: 'var(--tx3)', border: '1px solid var(--bd)', borderRadius: '4px', padding: '2px 6px', background: 'var(--bg2)', cursor: 'pointer' }}>
+            TOGGLE TO CONTROL COST
+          </button>
+        </div>
+        <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          
+          {/* Color variant grid */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+              <input type="checkbox" checked readOnly style={{ accentColor: 'var(--acc)' }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Color variant grid</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--suc-bg)', color: 'var(--suc)', padding: '1px 4px', borderRadius: '3px' }}>Always on</span>
+                </div>
+                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>{gridCols} cols × {gridRows} rows = {totalVariants} variants</small>
+                
+                {/* Row/Col editor controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                    <span>Cols</span>
+                    <button type="button" onClick={() => handleGridAdjust('cols', -1)} style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--bd)', borderRadius: '3px', background: 'var(--bg)' }}>-</button>
+                    <span style={{ fontWeight: 600 }}>{gridCols}</span>
+                    <button type="button" onClick={() => handleGridAdjust('cols', 1)} style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--bd)', borderRadius: '3px', background: 'var(--bg)' }}>+</button>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                    <span>Rows</span>
+                    <button type="button" onClick={() => handleGridAdjust('rows', -1)} style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--bd)', borderRadius: '3px', background: 'var(--bg)' }}>-</button>
+                    <span style={{ fontWeight: 600 }}>{gridRows}</span>
+                    <button type="button" onClick={() => handleGridAdjust('rows', 1)} style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--bd)', borderRadius: '3px', background: 'var(--bg)' }}>+</button>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '2px', marginLeft: '6px' }}>
+                    {Array.from({ length: totalVariants }).map((_, idx) => {
+                      const curColor = customColors[idx] || UC1_STANDARD_COLORS[idx % UC1_STANDARD_COLORS.length];
+                      const bgStyle = COLOR_HEX[curColor] || curColor;
+                      return (
+                        <div key={idx} style={{ width: '8px', height: '8px', borderRadius: '1px', background: bgStyle }} />
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Color selectors list */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                  {Array.from({ length: totalVariants }).map((_, idx) => {
+                    const currentColor = customColors[idx] || UC1_STANDARD_COLORS[idx % UC1_STANDARD_COLORS.length];
+                    return (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--bg)', border: '1px solid var(--bd)', padding: '2px 4px', borderRadius: '4px' }}>
+                        <span style={{ fontSize: '9px', color: 'var(--tx3)' }}>V{idx+1}:</span>
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: COLOR_HEX[currentColor] || currentColor }} />
+                        <select
+                          value={currentColor}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const updated = [...customColors];
+                            updated[idx] = val;
+                            onCustomColorsChange(updated);
+                          }}
+                          style={{ background: 'transparent', border: 'none', fontSize: '9px', color: 'var(--tx)', padding: 0 }}
+                        >
+                          {UC1_STANDARD_COLORS.map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-${baseCost.toFixed(2)}</span>
+              <button type="button" className="toggle on" disabled />
+            </div>
+          </div>
+
+          {/* Background removal */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input type="checkbox" checked readOnly style={{ accentColor: 'var(--acc)' }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Background removal + PNG export</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--suc-bg)', color: 'var(--suc)', padding: '1px 4px', borderRadius: '3px' }}>Always on</span>
+                </div>
+                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>matting → spill → uniform sizing → auto-naming</small>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-$0.08</span>
+              <button type="button" className="toggle on" disabled />
+            </div>
+          </div>
+
+          {/* Lifestyle Placement */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input type="checkbox" checked={lifestyleEnabled} onChange={(e) => onLifestyleChange(e.target.checked)} style={{ accentColor: 'var(--acc)' }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Lifestyle / scene imagery</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--bg3)', color: 'var(--tx3)', padding: '1px 4px', borderRadius: '3px' }}>Optional</span>
+                </div>
+                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>People in context - Controlled placement, proportions</small>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-${lifestyleCost.toFixed(2)}</span>
+              <button 
+                type="button" 
+                className={`toggle ${lifestyleEnabled ? 'on' : 'off'}`} 
+                onClick={() => onLifestyleChange(!lifestyleEnabled)} 
+              />
+            </div>
+          </div>
+
+          {/* Promo video clip */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input type="checkbox" checked={videoEnabled} onChange={(e) => onVideoChange(e.target.checked)} style={{ accentColor: 'var(--acc)' }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Promo video clip</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--bg3)', color: 'var(--tx3)', padding: '1px 4px', borderRadius: '3px' }}>Optional</span>
+                </div>
+                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>8-15 sec AI clip via Runway / Kling</small>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-${videoCost.toFixed(2)}</span>
+              <button 
+                type="button" 
+                className={`toggle ${videoEnabled ? 'on' : 'off'}`} 
+                onClick={() => onVideoChange(!videoEnabled)} 
+              />
+            </div>
+          </div>
+
+          {/* 360 spin set */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input type="checkbox" checked={spinEnabled} onChange={(e) => onSpinChange(e.target.checked)} style={{ accentColor: 'var(--acc)' }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>360° spin set</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--bg3)', color: 'var(--tx3)', padding: '1px 4px', borderRadius: '3px' }}>Optional</span>
+                </div>
+                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>8-12 angle views for e-commerce</small>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-${spinCost.toFixed(2)}</span>
+              <button 
+                type="button" 
+                className={`toggle ${spinEnabled ? 'on' : 'off'}`} 
+                onClick={() => onSpinChange(!spinEnabled)} 
+              />
+            </div>
+          </div>
+
+          {/* Social media crops */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input type="checkbox" checked={cropsEnabled} onChange={(e) => onCropsChange(e.target.checked)} style={{ accentColor: 'var(--acc)' }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Social media crops</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--bg3)', color: 'var(--tx3)', padding: '1px 4px', borderRadius: '3px' }}>Optional</span>
+                </div>
+                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>Instagram, X/blog, LinkedIn banner - auto-sized</small>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--suc)' }}>Free</span>
+              <button 
+                type="button" 
+                className={`toggle ${cropsEnabled ? 'on' : 'off'}`} 
+                onClick={() => onCropsChange(!cropsEnabled)} 
+              />
+            </div>
+          </div>
+
+          {/* Summary footer */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--bd)', paddingTop: '10px', fontSize: '11px', color: 'var(--tx3)' }}>
+            <span>Steps set: <strong>{3 + (lifestyleEnabled?1:0) + (videoEnabled?1:0) + (spinEnabled?1:0) + (cropsEnabled?1:0)}</strong></span>
+            <span>Images: <strong>{totalVariants}</strong></span>
+            <span>Est. cost: <strong style={{ color: 'var(--acc2)' }}>${totalCost.toFixed(2)}</strong></span>
+          </div>
+
+        </div>
+      </div>
+
+      {/* STEP 5: REVIEW PROMPT */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: 600, color: 'var(--tx3)', letterSpacing: '0.05em', marginBottom: '10px' }}>
+          STEP 5 – REVIEW PROMPT
+        </div>
+        <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="checkbox" checked readOnly style={{ accentColor: 'var(--acc)' }} />
+              <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Auto-generated system prompt</span>
+            </div>
+            <span style={{ fontSize: '9px', fontWeight: 600, border: '1px solid var(--bd)', borderRadius: '4px', padding: '2px 6px', background: 'var(--bg2)', color: 'var(--tx3)' }}>
+              v2.3 - {industry} - {targetMarket}
+            </span>
+          </div>
+
+          {/* Blue Callout Call */}
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--r)', padding: '10px', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+            <div style={{ color: '#2563eb', fontSize: '14px', lineHeight: 1 }}>ℹ</div>
+            <div style={{ fontSize: '11px', color: '#1e3a8a', lineHeight: 1.3 }}>
+              Built from your answers in Steps 1-3. Edit only if needed, or load from your prompt library.
+            </div>
+          </div>
+
+          {/* Prompt text area */}
+          <div className="field" style={{ margin: 0 }}>
+            <textarea 
+              value={promptText} 
+              onChange={(e) => onPromptChange(e.target.value)}
+              style={{ 
+                width: '100%', minHeight: '120px', fontFamily: 'monospace', 
+                fontSize: '11px', padding: '12px', background: 'var(--bg2)', 
+                border: '1px solid var(--bd)', borderRadius: 'var(--r)', color: 'var(--tx)', outline: 'none'
+              }}
+            />
+          </div>
+
+          {/* Preset Library Buttons */}
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button type="button" onClick={() => { setEditorText(promptText); setShowPromptEditor(true); }} style={{ flex: 1, padding: '8px', fontSize: '11px', fontWeight: 600, border: '1px solid var(--bd)', borderRadius: 'var(--r)', background: 'var(--bg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+              <TbPalette size={13} style={{ marginRight: '4px' }} /> Edit / refine prompt
+            </button>
+            <button type="button" onClick={() => setShowPromptLibrary(true)} style={{ flex: 1, padding: '8px', fontSize: '11px', fontWeight: 600, border: '1px solid var(--bd)', borderRadius: 'var(--r)', background: 'var(--bg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+              <TbBook size={13} style={{ marginRight: '4px' }} /> Load from library
+            </button>
+            <button type="button" onClick={() => alert('Prompt saved to library')} style={{ flex: 1, padding: '8px', fontSize: '11px', fontWeight: 600, border: '1px solid var(--bd)', borderRadius: 'var(--r)', background: 'var(--bg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+              <TbCopy size={13} style={{ marginRight: '4px' }} /> Save to library
+            </button>
+          </div>
+
+          {uploadError && <div className="notice err" style={{ marginTop: '10px' }}>{uploadError}</div>}
+        </div>
+      </div>
+
+      {/* Action Buttons Row */}
+      <div className="btn-row" style={{ display: 'flex', gap: '12px', marginTop: '24px', marginBottom: '24px' }}>
+        <Button 
+          type="button" 
+          variant="primary" 
+          onClick={onSubmit}
+          disabled={loading || (!uploadFile && !mockUploadMsg)}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--acc)', borderColor: 'var(--acc)', color: '#fff', padding: '12px 24px', height: 'auto', fontSize: '13px', fontWeight: 600 }}
+        >
+          {loading ? 'Processing...' : 'Confirm & start generation'} <TbArrowRight size={16} />
+        </Button>
+        
+        <Button 
+          type="button" 
+          variant="outline" 
+          onClick={() => {
+            alert('Draft saved successfully!');
+          }}
+          disabled={loading}
+          style={{ padding: '12px 24px', height: 'auto', fontSize: '13px', fontWeight: 600 }}
+        >
+          Save draft
+        </Button>
+      </div>
+
+      {/* Footer */}
+      <div style={{ borderTop: '1px solid var(--bd)', paddingTop: '16px', marginTop: '32px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--tx3)' }}>
+        <div>ChromaCraft AI - © 2026 Life180 Labs - All rights reserved.</div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <a href="#" style={{ color: 'var(--tx3)', textDecoration: 'none' }}>Privacy</a>
+          <a href="#" style={{ color: 'var(--tx3)', textDecoration: 'none' }}>Terms</a>
+          <a href="#" style={{ color: 'var(--tx3)', textDecoration: 'none' }}>Life180labs.com</a>
+        </div>
       </div>
 
       {/* ── MODAL: UPLOAD SOURCE SELECTOR ── */}

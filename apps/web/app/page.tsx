@@ -102,9 +102,10 @@ export default function Home() {
       try {
         const res = await fetch('/api/v1/jobs');
         if (res.ok) {
-          const updatedJobs: Job[] = await res.json();
-          setJobs(updatedJobs);
-          const currentJob = updatedJobs.find((j) => j.id === selectedJob.id);
+          const data = await res.json();
+          const safeData = Array.isArray(data) ? data : [];
+          setJobs(safeData);
+          const currentJob = safeData.find((j) => j.id === selectedJob.id);
           if (currentJob) {
             setSelectedJob(currentJob);
             if (currentJob.status !== 'PENDING' && currentJob.status !== 'PROCESSING') {
@@ -125,8 +126,16 @@ export default function Home() {
   const fetchJobs = async () => {
     try {
       const res = await fetch('/api/v1/jobs');
-      if (res.ok) setJobs(await res.json());
-    } catch (e) { console.error('Error fetching jobs:', e); }
+      if (res.ok) {
+        const data = await res.json();
+        setJobs(Array.isArray(data) ? data : []);
+      } else {
+        setJobs([]);
+      }
+    } catch (e) {
+      console.error('Error fetching jobs:', e);
+      setJobs([]);
+    }
   };
 
   const fetchProviders = async () => {
@@ -134,11 +143,17 @@ export default function Home() {
       const res = await fetch('/api/v1/providers');
       if (res.ok) {
         const data = await res.json();
-        setProviders(data);
-        const def = data.find((p: Provider) => p.default);
+        const safeData = Array.isArray(data) ? data : [];
+        setProviders(safeData);
+        const def = safeData.find((p: Provider) => p.default);
         if (def) setSelectedProviderId(def.id);
+      } else {
+        setProviders([]);
       }
-    } catch (e) { console.error('Error fetching providers:', e); }
+    } catch (e) {
+      console.error('Error fetching providers:', e);
+      setProviders([]);
+    }
   };
 
   const handleLogin = async (email: string, password: string) => {
@@ -174,6 +189,10 @@ export default function Home() {
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadFile) { setUploadError('Please select a file to upload'); return; }
+    if (!modelName || !industry || !targetAudience || !targetMarket) {
+      setUploadError('Please complete all required fields (Product Name, Industry, Audience, Market).');
+      return;
+    }
     setUploadError('');
     setLoading(true);
 
@@ -209,19 +228,45 @@ export default function Home() {
         cropsEnabled,
       };
 
-      const generateRes = await fetch('/api/v1/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: job.id,
-          prompt: promptText,
-          providerId: selectedProviderId,
-          settings,
-        }),
-      });
+      const selectedProvider = providers.find(p => p.id === selectedProviderId);
+      const hasApiKey = selectedProvider && !selectedProvider.name.toLowerCase().includes('mock') && !!selectedProvider.hasApiKey;
+
+      let success = false;
+      let errMsg = '';
+
+      if (hasApiKey) {
+        const generateRes = await fetch('/api/v1/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: job.id,
+            prompt: promptText,
+            providerId: selectedProviderId,
+            settings,
+          }),
+        });
+        success = generateRes.ok;
+        if (!success) {
+          const errData = await generateRes.json().catch(() => ({}));
+          errMsg = errData.error || 'Generation trigger failed';
+        }
+      } else {
+        // Free/Puter flow - save prompt/settings but keep status PENDING
+        const saveRes = await fetch('/api/v1/jobs', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: job.id,
+            prompt: promptText,
+            settings,
+          }),
+        });
+        success = saveRes.ok;
+        if (!success) errMsg = 'Failed to save workflow settings';
+      }
 
       setLoading(false);
-      if (generateRes.ok) {
+      if (success) {
         // Fetch jobs to get latest processing state
         const updatedJobsRes = await fetch('/api/v1/jobs');
         if (updatedJobsRes.ok) {
@@ -233,8 +278,7 @@ export default function Home() {
         // Redirect to generate progress tab
         setActiveTab('generate');
       } else {
-        const errData = await generateRes.json();
-        setUploadError(errData.error || 'Generation trigger failed');
+        setUploadError(errMsg);
       }
     } catch (err: any) {
       setLoading(false);
@@ -287,10 +331,11 @@ export default function Home() {
     } catch (e) { console.error('QA update failed:', e); }
   };
 
-  const handleExportUrl = async () => {
+  const handleExportUrl = async (format?: string) => {
     if (!selectedJob) return;
     try {
-      const res = await fetch(`/api/v1/export?jobId=${selectedJob.id}&mode=url`);
+      const formatParam = format ? `&format=${format}` : '&format=png';
+      const res = await fetch(`/api/v1/export?jobId=${selectedJob.id}&mode=url${formatParam}`);
       if (res.ok) {
         const data = await res.json();
         setExportUrl(data.url);
@@ -390,7 +435,9 @@ export default function Home() {
             userInitials={userInitials}
             nightMode={nightMode}
             onToggleNight={() => setNightMode(!nightMode)}
-            onSignOut={() => signOut()}
+            onSignOut={async () => {
+              await signOut({ callbackUrl: '/' });
+            }}
             onProvidersUpdated={fetchProviders}
             onProfileUpdated={(newName) => update({ name: newName })}
           />

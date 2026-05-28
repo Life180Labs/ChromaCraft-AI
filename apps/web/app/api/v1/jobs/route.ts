@@ -34,10 +34,25 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   const userId = await getUserId(request as any);
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  const { id, status } = await request.json();
+  const { id, status, name, prompt, settings } = await request.json();
   const job = await prisma.job.update({
-    where: { id, userId: Number(userId) },
-    data: { status },
+    where: { id: Number(id), userId: Number(userId) },
+    data: {
+      status: status || undefined,
+      name: name || undefined,
+      prompt: prompt ? {
+        upsert: {
+          create: { name: 'generation-prompt', content: prompt },
+          update: { content: prompt },
+        }
+      } : undefined,
+      generation: settings ? {
+        upsert: {
+          create: { metadata: settings },
+          update: { metadata: settings },
+        }
+      } : undefined,
+    },
   });
   return NextResponse.json(job);
 }

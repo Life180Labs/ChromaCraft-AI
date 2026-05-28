@@ -18,6 +18,8 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
     const name = formData.get('name') as string | null;
+    const jobId = formData.get('jobId') as string | null;
+    const color = formData.get('color') as string | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
@@ -26,8 +28,44 @@ export async function POST(req: NextRequest) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
+    if (jobId && color) {
+      const numericJobId = Number(jobId);
+      const safeColor = color.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '').toLowerCase();
+
+      // Verify job belongs to user
+      const job = await prisma.job.findFirst({
+        where: { id: numericJobId, userId: Number(userId) },
+      });
+      if (!job) {
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      }
+
+      // Save to storage/assets/<jobId>/raw_<color>.png
+      const baseStorageDir = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage');
+      const jobAssetDir = path.join(baseStorageDir, 'assets', String(numericJobId));
+      await mkdir(jobAssetDir, { recursive: true });
+
+      const filename = `raw_${safeColor}.png`;
+      const filePath = path.join(jobAssetDir, filename);
+
+      await writeFile(filePath, buffer);
+
+      // Create Asset in db
+      const asset = await prisma.asset.create({
+        data: {
+          type: 'variant',
+          path: filePath,
+          status: 'done',
+          jobId: numericJobId,
+        },
+      });
+
+      return NextResponse.json({ success: true, asset }, { status: 201 });
+    }
+
     // Save to local storage
-    const storageDir = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage', 'uploads');
+    const baseStorage = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage');
+    const storageDir = path.join(baseStorage, 'uploads');
     await mkdir(storageDir, { recursive: true });
 
     const fileExt = path.extname(file.name) || '.png';

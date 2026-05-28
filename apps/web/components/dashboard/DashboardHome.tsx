@@ -11,9 +11,10 @@ type DashboardHomeProps = {
   onSelectJob: (job: Job) => void;
 };
 
-export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs, onNavigate, onSelectJob }) => {
-  const completedCount = jobs.filter(j => j.status === 'COMPLETED').length;
-  const totalAssets = jobs.reduce((acc, j) => acc + (j.assets?.length || 0), 0);
+export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs = [], onNavigate, onSelectJob }) => {
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
+  const completedCount = safeJobs.filter(j => j.status === 'COMPLETED').length;
+  const totalAssets = safeJobs.reduce((acc, j) => acc + (j.assets?.length || 0), 0);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -42,7 +43,7 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs, on
       {/* Stats grid — restored from prototype */}
       <div className="g3" style={{ marginBottom: '20px' }}>
         <div className="profile-stat">
-          <div className="profile-stat-val">{jobs.length}</div>
+          <div className="profile-stat-val">{safeJobs.length}</div>
           <div className="profile-stat-lbl">Jobs this month</div>
         </div>
         <div className="profile-stat">
@@ -58,11 +59,11 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs, on
       {/* Recent jobs */}
       <div className="sec">Recent jobs</div>
       <div className="card">
-        {jobs.length === 0 ? (
+        {safeJobs.length === 0 ? (
           <p style={{ color: 'var(--tx3)', fontSize: 12 }}>No jobs yet. Click &quot;New job&quot; to start.</p>
         ) : (
           <>
-            {jobs.slice(0, 5).map((job) => (
+            {safeJobs.slice(0, 5).map((job) => (
               <div key={job.id} className="job-row" onClick={() => { onSelectJob(job); onNavigate('history'); }}>
                 <div className="job-ico"><TbPackage /></div>
                 <div className="job-info">

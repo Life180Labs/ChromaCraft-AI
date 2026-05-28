@@ -18,7 +18,8 @@ function assetLabel(path: string): string {
   return base.replace(/\.png$/i, '');
 }
 
-export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs, selectedJob, onSelectJob, onQAReview, onNavigate }) => {
+export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs = [], selectedJob, onSelectJob, onQAReview, onNavigate }) => {
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
   const qaAssets = selectedJob?.assets?.filter(a => a.type === 'processed') || [];
   const allApproved = qaAssets.length > 0 && qaAssets.every(a => a.status === 'approved');
 
@@ -31,12 +32,12 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs, selectedJob, onSelectJ
           <select
             value={selectedJob?.id || ''}
             onChange={(e) => {
-              const j = jobs.find((x) => x.id === Number(e.target.value));
+              const j = safeJobs.find((x) => x.id === Number(e.target.value));
               if (j) onSelectJob(j);
             }}
           >
             <option value="">-- Choose Job --</option>
-            {jobs.map((j) => (
+            {safeJobs.map((j) => (
               <option key={j.id} value={j.id}>{j.name} ({j.status})</option>
             ))}
           </select>

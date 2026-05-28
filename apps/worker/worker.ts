@@ -53,6 +53,7 @@ interface GenerateJobData {
   prompt: string;
   provider: string;
   apiKey: string;
+  refImagePath?: string;
   settings?: GenerationSettings & { prefix?: string; colors?: string[] };
 }
 
@@ -145,7 +146,7 @@ const uploadWorker = new Worker(
 const generateWorker = new Worker(
   'generate',
   async (job: BullJob<GenerateJobData>) => {
-    const { jobId, prompt, provider, apiKey, settings } = job.data;
+    const { jobId, prompt, provider, apiKey, refImagePath, settings } = job.data;
     logger.info({ jobId, provider, settings }, 'Generate worker: starting');
 
     try {
@@ -173,6 +174,18 @@ const generateWorker = new Worker(
       }
 
       const prefix = derivePrefix(dbJob.name, settings);
+
+      // HYBRID GENERATION / FREE TIER BYPASS
+      if (settings && (settings as any).skipGeneration) {
+        logger.info({ jobId }, 'skipGeneration flag detected. Skipping AI ReAct generation.');
+        // Enqueue post-processing directly
+        await processingQueue.add('process-catalog-variants', {
+          jobId,
+          prefix,
+        } satisfies ProcessingJobData);
+        return { success: true, message: 'Skipped generation, enqueued processing' };
+      }
+
       const refAsset = dbJob.assets.find((a) => a.type === 'original');
       const refImagePath = refAsset?.path;
 

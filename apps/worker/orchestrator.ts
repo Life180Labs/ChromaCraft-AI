@@ -2,16 +2,16 @@
  * AgentController — ReAct loop for ChromaCraft image generation.
  *
  * Supports:
- *   • Multi-color catalog variant generation (generate task)
- *   • 360° turntable spin generation (spin360 task)
- *   • Video / GIF assembly from spin frames (video task)
+ * • Multi-color catalog variant generation (generate task)
+ * • 360° turntable spin generation (spin360 task)
+ * • Video / GIF assembly from spin frames (video task)
  *
  * Loop per color variant:
- *   1. Plan  → compose an enhanced prompt for this iteration
- *   2. Act   → invoke the Python generate tool (JSON-mode)
- *   3. Judge → call the Vision Judge API to evaluate the output
- *   4. Log   → persist an Iteration record in the database
- *   5. Retry → if judge fails and retries remain, re-prompt with the critique
+ * 1. Plan  → compose an enhanced prompt for this iteration
+ * 2. Act   → invoke the Python generate tool (JSON-mode)
+ * 3. Judge → call the Vision Judge API to evaluate the output
+ * 4. Log   → persist an Iteration record in the database
+ * 5. Retry → if judge fails and retries remain, re-prompt with the critique
  */
 
 import { PrismaClient, IterationStatus, Prisma } from '@prisma/client';
@@ -19,6 +19,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
+import sharp from 'sharp';
 
 const logger = pino({ name: 'chromacraft-orchestrator' });
 
@@ -42,6 +43,7 @@ export interface GenerationSettings {
   imageSize?: string; // e.g. "800x600"
   spinFrames?: number;
   fps?: number;
+  skipGeneration?: boolean; // <-- Added flag for Puter.js hybrid approach
 }
 
 export interface GenerationParams {
@@ -112,15 +114,6 @@ export class AgentController {
     this.scriptDir = path.join(process.cwd(), 'python');
   }
 
-  /**
-   * Main entry point: run the full ReAct generation loop for a job.
-   *
-   * @param jobId       Database ID of the Job record
-   * @param goal        Human-readable generation goal
-   * @param params      Provider credentials, output paths, and settings
-   * @param colors      Array of color names to process
-   * @param basePrompt  Template prompt string (use [color] as placeholder)
-   */
   async run(
     jobId: number,
     goal: string,
@@ -163,11 +156,102 @@ export class AgentController {
       });
     }
 
+    // ── Grid Engine & Smart Crop ──
+    const cols = params.settings?.cols ?? 4;
+    const rows = params.settings?.rows ?? 3;
+    const passedResults = results.filter(r => r.passed && r.assetPath);
+    
+    if (passedResults.length > 0 && cols > 0 && rows > 0 && passedResults.length <= cols * rows) {
+      try {
+        logger.info({ jobId }, 'Grid Engine: Stitching generated variants into a master grid');
+        
+        // Find dimensions of the first valid image to establish a baseline
+        const firstMetadata = await sharp(passedResults[0].assetPath).metadata();
+        const cellWidth = firstMetadata.width || 800;
+        const cellHeight = firstMetadata.height || 600;
+        
+        // Prepare composite inputs
+        const composites = [];
+        for (let i = 0; i < passedResults.length; i++) {
+          const r = Math.floor(i / cols);
+          const c = i % cols;
+          composites.push({
+            input: passedResults[i].assetPath!,
+            top: r * cellHeight,
+            left: c * cellWidth,
+          });
+        }
+        
+        const gridWidth = cols * cellWidth;
+        const gridHeight = Math.ceil(passedResults.length / cols) * cellHeight;
+        
+        const gridFilename = `grid_${params.settings?.prefix || jobId}.png`;
+        const gridPath = path.join(params.outDir, gridFilename);
+        
+        await sharp({
+          create: {
+            width: gridWidth,
+            height: gridHeight,
+            channels: 4,
+            background: { r: 255, g: 255, b: 255, alpha: 1 }
+          }
+        })
+        .composite(composites)
+        .png()
+        .toFile(gridPath);
+        
+        // Register the grid in DB
+        await this.prisma.asset.create({
+          data: {
+            jobId,
+            type: 'processed',
+            path: gridPath,
+            status: 'done',
+          }
+        });
+        logger.info({ jobId, gridPath }, 'Grid stitched successfully');
+        
+        // Smart Crop for Social Media (if 2x2 and enabled)
+        if (params.settings?.cropsEnabled && cols === 2 && rows === 2 && passedResults.length === 4) {
+          logger.info({ jobId }, 'Smart Crop: Slicing 2x2 grid for social media');
+          for (let i = 0; i < 4; i++) {
+            const r = Math.floor(i / 2);
+            const c = i % 2;
+            const cropFilename = `social_crop_${i}_${params.settings?.prefix || jobId}.png`;
+            const cropPath = path.join(params.outDir, cropFilename);
+            
+            await sharp(gridPath)
+              .extract({
+                left: c * cellWidth,
+                top: r * cellHeight,
+                width: cellWidth,
+                height: cellHeight
+              })
+              .png()
+              .toFile(cropPath);
+              
+            await this.prisma.asset.create({
+              data: {
+                jobId,
+                type: 'processed',
+                path: cropPath,
+                status: 'done',
+              }
+            });
+          }
+          logger.info({ jobId }, 'Smart Crop slices created successfully');
+        }
+      } catch (err: any) {
+        logger.error({ jobId, err: err.message }, 'Grid Engine / Smart Crop failed (non-blocking)');
+      }
+    }
+
     // ── Spin 360 ──
-    if (params.settings?.spinEnabled && params.refImagePath) {
+    const spinBaseImage = (passedResults.length > 0 ? passedResults[0].assetPath : null) || params.refImagePath;
+    if (params.settings?.spinEnabled && spinBaseImage) {
       logger.info({ jobId }, 'Spin 360 enabled — generating turntable frames');
       try {
-        const spinResult = await this.generateSpin360(jobId, params);
+        const spinResult = await this.generateSpin360(jobId, params, spinBaseImage);
         if (spinResult.videoPath) {
           await this.prisma.asset.create({
             data: {
@@ -194,10 +278,6 @@ export class AgentController {
     return results;
   }
 
-  // ---------------------------------------------------------------------------
-  // Process a single color with retry loop
-  // ---------------------------------------------------------------------------
-
   private async processColor(
     jobId: number,
     goal: string,
@@ -205,7 +285,24 @@ export class AgentController {
     basePrompt: string,
     params: GenerationParams,
   ): Promise<VariantResult> {
-    let currentPrompt = await this.planPrompt(basePrompt, color, goal, null);
+
+    // -----------------------------------------------------------------------
+    // HYBRID CHECK: If skipGeneration is true, asset is already uploaded!
+    // -----------------------------------------------------------------------
+    if (params.settings?.skipGeneration) {
+      logger.info({ jobId, color }, 'skipGeneration is TRUE (Puter fallback). Skipping Python generate.py task.');
+      const safeColor = color.trim().replace(/\s+/g, '_');
+      return {
+        color,
+        iterationId: 0,
+        assetPath: path.join(params.outDir, `raw_${safeColor}.png`),
+        passed: true,
+        critique: 'Successfully generated and uploaded via Puter.js (Client-side)',
+        attempts: 1,
+      };
+    }
+
+    let currentPrompt = await this.planPrompt(basePrompt, color, goal, null, params);
     let attempt = 0;
     let lastCritique = '';
     let iterationId = 0;
@@ -230,13 +327,12 @@ export class AgentController {
           data: { status: IterationStatus.FAILED, critique: reason },
         });
         lastCritique = reason;
-        currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique);
+        currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique, params);
         continue;
       }
 
       assetPath = toolOutput.path;
 
-      // Judge
       let judgeResult: JudgeResponse;
       try {
         judgeResult = await this.invokeJudge(assetPath, goal, color);
@@ -263,39 +359,39 @@ export class AgentController {
           where: { id: iterationId },
           data: { status: IterationStatus.RETRYING },
         });
-        currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique);
+        currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique, params);
       }
     }
 
-    // All retries exhausted — return failed result instead of throwing
-    // so one bad color doesn't kill the entire job
     logger.error({ jobId, color }, `All ${MAX_ITERATIONS} attempts failed for color "${color}"`);
     return {
       color,
       iterationId,
-      assetPath,          // may still be a file on disk even if judge failed
+      assetPath,
       passed: false,
       critique: lastCritique,
       attempts: attempt,
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Plan: compose an enhanced, critique-aware prompt
-  // ---------------------------------------------------------------------------
-
   private async planPrompt(
     basePrompt: string,
     color: string,
     goal: string,
     critique: string | null,
+    params: GenerationParams
   ): Promise<string> {
     const colorResolved = basePrompt.replace(/\[color\]/gi, color);
+    
+    let lifestyleAppend = '';
+    if (params.settings?.lifestyleEnabled && params.settings?.targetMarket) {
+      lifestyleAppend = ` Set in a photorealistic ${params.settings.targetMarket} environment.`;
+    }
 
     if (!critique) {
       return (
         `${colorResolved}. Vehicle exterior color: ${color}. ` +
-        `Goal: ${goal}. Photorealistic, studio lighting, white background, catalog quality.`
+        `Goal: ${goal}. Photorealistic, studio lighting, catalog quality.${lifestyleAppend}`
       );
     }
 
@@ -303,7 +399,7 @@ export class AgentController {
     return (
       `${colorResolved}. Vehicle exterior color: ${color}. ` +
       `Goal: ${goal}. Adjustments: ${adjustments}. ` +
-      `Photorealistic, studio lighting, white background, catalog quality.`
+      `Photorealistic, studio lighting, catalog quality.${lifestyleAppend}`
     );
   }
 
@@ -336,10 +432,6 @@ export class AgentController {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Act: invoke Python generate.py
-  // ---------------------------------------------------------------------------
-
   private async invokeTool(
     jobId: number,
     prompt: string,
@@ -366,14 +458,13 @@ export class AgentController {
       if (exists) args.push('--refImage', params.refImagePath);
     }
 
-    logger.debug({ jobId, color, args: args.join(' ') }, 'Spawning Python generate');
+    logger.debug({ jobId, color, args: args.join(' ') }, 'Spawning Python task');
     const { exitCode, stdout, stderr } = await runProcess('python', [scriptPath, ...args]);
 
     if (exitCode !== 0) {
       return { status: 'error', reason: `Python exited ${exitCode}: ${stderr.slice(0, 500)}` };
     }
 
-    // Parse the last JSON line emitted by --jsonMode
     const lines = stdout.trim().split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i].trim();
@@ -386,11 +477,7 @@ export class AgentController {
     return { status: 'error', reason: `No JSON in stdout: ${stdout.slice(0, 300)}` };
   }
 
-  // ---------------------------------------------------------------------------
-  // Spin 360
-  // ---------------------------------------------------------------------------
-
-  private async generateSpin360(jobId: number, params: GenerationParams): Promise<SpinResult> {
+  private async generateSpin360(jobId: number, params: GenerationParams, spinBaseImage: string): Promise<SpinResult> {
     const scriptPath = path.join(this.scriptDir, 'generate.py');
     const spinsDir = path.join(params.outDir, 'spin360');
     await fs.promises.mkdir(spinsDir, { recursive: true });
@@ -402,7 +489,7 @@ export class AgentController {
     const spinArgs = [
       scriptPath,
       '--task', 'spin360',
-      '--refImage', params.refImagePath!,
+      '--refImage', spinBaseImage,
       '--outDir', spinsDir,
       '--prefix', prefix,
       '--frames', String(frames),
@@ -431,7 +518,6 @@ export class AgentController {
       throw new Error('No spin frames were produced');
     }
 
-    // Generate video
     let videoPath: string | null = null;
     if (params.settings?.videoEnabled) {
       const videoOutPath = path.join(spinsDir, `${prefix}_360.mp4`);
@@ -462,10 +548,6 @@ export class AgentController {
     return { prefix, framePaths, videoPath };
   }
 
-  // ---------------------------------------------------------------------------
-  // Judge
-  // ---------------------------------------------------------------------------
-
   private async invokeJudge(imagePath: string, goal: string, color: string): Promise<JudgeResponse> {
     const url = `${JUDGE_BASE_URL}/api/v1/judge`;
     const resp = await fetch(url, {
@@ -480,10 +562,6 @@ export class AgentController {
     const data = await resp.json();
     return { passed: Boolean(data.passed), critique: String(data.critique ?? '') };
   }
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
 
   private async getExistingHistory(jobId: number): Promise<Prisma.InputJsonValue[]> {
     const job = await this.prisma.job.findUnique({ where: { id: jobId }, select: { statusHistory: true } });
@@ -502,10 +580,6 @@ export class AgentController {
     ];
   }
 }
-
-// ---------------------------------------------------------------------------
-// Utility: spawn child process and collect output
-// ---------------------------------------------------------------------------
 
 async function runProcess(
   command: string,

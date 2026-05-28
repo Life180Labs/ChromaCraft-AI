@@ -34,8 +34,12 @@ export async function POST(req: NextRequest) {
       if (!activeProvider) activeProvider = await prisma.aiProvider.findFirst();
     }
 
-    const providerName = activeProvider?.name || process.env.AI_PROVIDER_DEFAULT || 'mock';
-    const apiKey = activeProvider?.apiKey || process.env.AI_OPENAI_KEY || '';
+    if (!activeProvider || activeProvider.name.toLowerCase() === 'mock') {
+      return NextResponse.json({ error: 'No active AI Provider configured. Please configure OpenAI or Stability AI in Profile Settings to use standard generation.' }, { status: 400 });
+    }
+
+    const providerName = activeProvider.name;
+    const apiKey = activeProvider.apiKey;
 
     // Update job status
     await prisma.job.update({
@@ -92,12 +96,17 @@ export async function POST(req: NextRequest) {
     };
 
     // Enqueue generation in BullMQ
+    const originalAsset = await prisma.asset.findFirst({
+      where: { jobId: job.id, type: 'original' }
+    });
+
     await generateQueue.add('process-generation', {
       jobId: job.id,
       prompt,
       provider: providerName,
       apiKey,
       settings: catalogSettings,
+      refImagePath: originalAsset?.path,
     });
 
     return NextResponse.json({
