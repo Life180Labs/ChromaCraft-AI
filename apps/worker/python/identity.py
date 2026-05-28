@@ -10,13 +10,22 @@ import argparse
 import json
 import os
 import sys
+import warnings
 from io import BytesIO
 from typing import Optional
 
-import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 from rembg import remove as remove_bg
+
+warnings.filterwarnings("ignore")
+
+CV2_AVAILABLE = False
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    pass
 
 
 def color_to_slug(color: str) -> str:
@@ -35,32 +44,52 @@ def create_segmentation_mask(image_path: str) -> np.ndarray:
 
 def extract_edges(image_path: str, low_thresh: int = 50, high_thresh: int = 150) -> np.ndarray:
     """Canny edge detection for ControlNet structure guidance."""
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"Cannot read image: {image_path}")
-    edges = cv2.Canny(img, low_thresh, high_thresh)
+    img = Image.open(image_path).convert("L")
+    img_np = np.array(img)
+    if CV2_AVAILABLE:
+        img_cv = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if img_cv is None:
+            img_cv = img_np
+        edges = cv2.Canny(img_cv, low_thresh, high_thresh)
+    else:
+        from PIL import ImageFilter
+        edges_np = np.array(img.filter(ImageFilter.FIND_EDGES))
+        _, edges = cv2_threshold(edges_np, 30, 255)
     return edges
 
 
 def extract_soft_edges(image_path: str) -> np.ndarray:
-    """Soft edge detection (HED-style) for structure preservation."""
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"Cannot read image: {image_path}")
-    blurred = cv2.GaussianBlur(img, (5, 5), 0)
-    edges = cv2.Canny(blurred, 30, 100)
-    dilated = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    """Soft edge detection for structure preservation."""
+    img = Image.open(image_path).convert("L")
+    if CV2_AVAILABLE:
+        img_cv = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if img_cv is None:
+            img_cv = np.array(img)
+        blurred = cv2.GaussianBlur(img_cv, (5, 5), 0)
+        edges = cv2.Canny(blurred, 30, 100)
+        dilated = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    else:
+        from PIL import ImageFilter
+        blurred = img.filter(ImageFilter.SMOOTH).filter(ImageFilter.SMOOTH)
+        edges_np = np.array(blurred.filter(ImageFilter.FIND_EDGES))
+        _, dilated = cv2_threshold(edges_np, 25, 255)
     return dilated
 
 
 def estimate_depth(image_path: str) -> np.ndarray:
-    """MiDaS depth estimation fallback using simple Laplacian variance."""
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"Cannot read image: {image_path}")
-    laplacian = cv2.Laplacian(img, cv2.CV_64F)
-    depth_map = cv2.normalize(laplacian, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    return depth_map
+    """Depth estimation using Laplacian variance (no MiDaS dependency)."""
+    img = Image.open(image_path).convert("L")
+    img_np = np.array(img, dtype=np.float64)
+    from PIL import ImageFilter
+    lap = np.array(img.filter(ImageFilter.Kernel((3, 3), [0, -1, 0, -1, 4, -1, 0, -1, 0], scale=1)))
+    depth = np.clip(np.abs(lap), 0, 255).astype(np.uint8)
+    return depth
+
+
+def cv2_threshold(img: np.ndarray, thresh: int, maxval: int) -> tuple:
+    """Simple threshold fallback when opencv unavailable."""
+    result = np.where(img > thresh, maxval, 0).astype(np.uint8)
+    return (result, result)
 
 
 def create_control_inputs(image_path: str) -> dict:
@@ -104,9 +133,12 @@ def identity_lock_composite(
 
     mask_np = np.array(mask_resized).astype(np.float32) / 255.0
 
-    # Feather mask edges
-    if blur_radius > 0:
+    # Feather mask edges using PIL
+    if blur_radius > 0 and CV2_AVAILABLE:
         mask_np = cv2.GaussianBlur(mask_np, (blur_radius * 2 + 1, blur_radius * 2 + 1), 0)
+    elif blur_radius > 0:
+        mask_pil = mask_resized.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+        mask_np = np.array(mask_pil).astype(np.float32) / 255.0
 
     orig_np = np.array(orig_resized).astype(np.float32)
     gen_np = np.array(gen).astype(np.float32)
@@ -129,58 +161,48 @@ def identity_lock_recolor(
 ) -> str:
     """
     Advanced identity lock that preserves structure but allows color changes.
-    Only modifies hue channel within the product region.
+    Uses HSV color space via PIL.
     """
-    orig = cv2.imread(original_path, cv2.IMREAD_UNCHANGED)
-    gen = cv2.imread(generated_path, cv2.IMREAD_UNCHANGED)
+    orig = Image.open(original_path).convert("RGBA")
+    gen = Image.open(generated_path).convert("RGBA")
 
-    if orig is None or gen is None:
-        raise ValueError("Cannot read input images for identity lock recolor")
-
-    gen = cv2.resize(gen, (orig.shape[1], orig.shape[0]))
+    gen = gen.resize(orig.size, Image.LANCZOS)
 
     # Create mask from original alpha or segmentation
-    if orig.shape[2] == 4:
-        mask = orig[:, :, 3]
-    else:
-        mask = create_segmentation_mask(original_path)
-        mask = cv2.resize(mask, (orig.shape[1], orig.shape[0]))
+    orig_np = np.array(orig)
+    mask = create_segmentation_mask(original_path)
+    mask_pil = Image.fromarray(mask).resize(orig.size, Image.LANCZOS)
+    mask_np = np.array(mask_pil).astype(np.float32) / 255.0
 
-    mask_np = mask.astype(np.float32) / 255.0
     if preservation_strength > 0:
         mask_np = mask_np * (1.0 - preservation_strength) + preservation_strength
 
-    # Convert both to HSV
-    if orig.shape[2] >= 3:
-        orig_rgb = orig[:, :, :3]
-    else:
-        orig_rgb = cv2.cvtColor(orig, cv2.COLOR_GRAY2BGR)
+    # Convert both to HSV using colorsys (no cv2 dependency)
+    import colorsys
+    gen_np = np.array(gen).astype(np.float32) / 255.0
+    orig_np = orig_np.astype(np.float32) / 255.0
 
-    if gen.shape[2] >= 3:
-        gen_rgb = gen[:, :, :3]
-    else:
-        gen_rgb = cv2.cvtColor(gen, cv2.COLOR_GRAY2BGR)
+    result = np.zeros_like(orig_np)
+    for y in range(orig_np.shape[0]):
+        for x in range(orig_np.shape[1]):
+            if mask_np[y, x] > 0.01:
+                r_o, g_o, b_o = orig_np[y, x, :3]
+                r_g, g_g, b_g = gen_np[y, x, :3]
+                h_o, s_o, v_o = colorsys.rgb_to_hsv(r_o, g_o, b_o)
+                h_g, s_g, v_g = colorsys.rgb_to_hsv(r_g, g_g, b_g)
+                # Blend: hue from generated, sat/value from original
+                m = mask_np[y, x]
+                h = h_g * m + h_o * (1 - m)
+                s = s_g * m + s_o * (1 - m)
+                v = v_o
+                r, g, b = colorsys.hsv_to_rgb(h, s, v)
+                result[y, x, :3] = [r, g, b]
+                result[y, x, 3] = orig_np[y, x, 3]
+            else:
+                result[y, x] = orig_np[y, x]
 
-    orig_hsv = cv2.cvtColor(orig_rgb, cv2.COLOR_BGR2HSV)
-    gen_hsv = cv2.cvtColor(gen_rgb, cv2.COLOR_BGR2HSV)
-
-    # Take hue from generated, saturation and value from original (preserve texture)
-    blended_hsv = orig_hsv.copy()
-    blended_hsv[:, :, 0] = (
-        gen_hsv[:, :, 0] * mask_np + orig_hsv[:, :, 0] * (1.0 - mask_np)
-    ).astype(np.uint8)
-    blended_hsv[:, :, 1] = (
-        gen_hsv[:, :, 1] * mask_np + orig_hsv[:, :, 1] * (1.0 - mask_np)
-    ).astype(np.uint8)
-
-    blended_rgb = cv2.cvtColor(blended_hsv, cv2.COLOR_HSV2BGR)
-
-    if orig.shape[2] == 4:
-        result = cv2.merge([blended_rgb, orig[:, :, 3]])
-    else:
-        result = blended_rgb
-
-    cv2.imwrite(output_path, result)
+    result = np.clip(result * 255, 0, 255).astype(np.uint8)
+    Image.fromarray(result).save(output_path, "PNG")
     return output_path
 
 
@@ -192,32 +214,35 @@ def mask_by_color_hsl_shift(
 ) -> str:
     """
     Zero-cost recoloring by shifting HSL hue in the masked region.
-    Uses no AI - purely algorithmic color transformation.
+    Uses PIL + colorsys — no cv2 dependency.
     """
-    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        raise ValueError(f"Cannot read image: {image_path}")
+    img = Image.open(image_path).convert("RGBA")
+    img_np = np.array(img).astype(np.float32) / 255.0
 
     if mask is None:
         mask = create_segmentation_mask(image_path)
-        mask = cv2.resize(mask, (img.shape[1], img.shape[0]))
+    mask_pil = Image.fromarray(mask).resize(img.size, Image.LANCZOS)
+    mask_np = np.array(mask_pil).astype(np.float32) / 255.0
 
-    rgb = img[:, :, :3]
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
+    import colorsys
+    target_hue_norm = target_hue / 180.0  # Normalize to 0-1
 
-    # Shift hue toward target
-    current_hue = np.median(hsv[:, :, 0][mask > 128])
-    shift = (target_hue - current_hue) % 180
-    hsv[:, :, 0] = (hsv[:, :, 0] + (shift * (mask > 128).astype(np.uint8))) % 180
+    result = np.zeros_like(img_np)
+    for y in range(img_np.shape[0]):
+        for x in range(img_np.shape[1]):
+            if mask_np[y, x] > 0.5:
+                r, g, b = img_np[y, x, :3]
+                h, s, v = colorsys.rgb_to_hsv(r, g, b)
+                # Shift hue toward target within mask
+                h = target_hue_norm
+                r2, g2, b2 = colorsys.hsv_to_rgb(h, s, v)
+                result[y, x, :3] = [r2, g2, b2]
+                result[y, x, 3] = img_np[y, x, 3]
+            else:
+                result[y, x] = img_np[y, x]
 
-    blended = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-
-    if img.shape[2] == 4:
-        result = cv2.merge([blended, img[:, :, 3]])
-    else:
-        result = blended
-
-    cv2.imwrite(output_path, result)
+    result = np.clip(result * 255, 0, 255).astype(np.uint8)
+    Image.fromarray(result).save(output_path, "PNG")
     return output_path
 
 

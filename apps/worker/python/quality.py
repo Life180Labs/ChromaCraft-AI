@@ -31,11 +31,9 @@ try:
 except ImportError:
     pass
 
-try:
-    import clip
-    CLIP_AVAILABLE = TORCH_AVAILABLE
-except ImportError:
-    pass
+CLIP_AVAILABLE = False
+_loaded_clip_model = None
+_loaded_clip_preprocess = None
 
 try:
     # DINOv2 can be loaded via torch.hub or direct import
@@ -120,18 +118,45 @@ def psnr(img1: np.ndarray, img2: np.ndarray) -> float:
 # CLIP Score
 # ---------------------------------------------------------------------------
 
+def _load_clip():
+    global _loaded_clip_model, _loaded_clip_preprocess, CLIP_AVAILABLE
+    if _loaded_clip_model is not None:
+        return _loaded_clip_model, _loaded_clip_preprocess
+    if not TORCH_AVAILABLE:
+        CLIP_AVAILABLE = False
+        return None, None
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = torch.hub.load('openai/CLIP', 'ViT-B/32', pretrained=True).to(device).eval()
+        from torchvision import transforms
+        preprocess = transforms.Compose([
+            transforms.Resize(224, interpolation=Image.BICUBIC),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                                 std=[0.26862954, 0.26130258, 0.27577711]),
+        ])
+        _loaded_clip_model = model
+        _loaded_clip_preprocess = preprocess
+        CLIP_AVAILABLE = True
+        return model, preprocess
+    except Exception as e:
+        print(f"[WARN] CLIP model load failed: {e}", file=sys.stderr)
+        CLIP_AVAILABLE = False
+        return None, None
+
+
 def clip_score(img1: Image.Image, img2: Image.Image) -> float:
-    """CLIP embedding cosine similarity."""
-    if not CLIP_AVAILABLE:
+    """CLIP embedding cosine similarity via torch hub."""
+    model, preprocess = _load_clip()
+    if model is None:
         return 0.0
 
     try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
-
+        device = next(model.parameters()).device
         with torch.no_grad():
-            img1_tensor = preprocess(img1).unsqueeze(0).to(device)
-            img2_tensor = preprocess(img2).unsqueeze(0).to(device)
+            img1_tensor = preprocess(img1.convert("RGB")).unsqueeze(0).to(device)
+            img2_tensor = preprocess(img2.convert("RGB")).unsqueeze(0).to(device)
 
             emb1 = model.encode_image(img1_tensor)
             emb2 = model.encode_image(img2_tensor)
