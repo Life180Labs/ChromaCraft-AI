@@ -55,37 +55,25 @@ def generate_stability_identity(
     seed: int = 42,
 ) -> str:
     """
-    Identity-preserving generation using Stability AI Search & Replace.
-    - Low denoise strength (0.4) to preserve structure
+    Identity-preserving generation using Stability AI ControlNet Structure.
+    - Uses stable-image/control/structure
     - Fixed seed for consistency
-    - Post-generation identity lock composite
     """
     if not ref_image_path or not os.path.isfile(ref_image_path):
         raise ValueError(f"Reference image not found at '{ref_image_path}'. Generation aborted.")
 
-    print(f"[INFO] Identity-preserving generation for {color} (denoise={denoise_strength}, seed={seed})...", file=sys.stderr)
-
-    # Segmentation mask for identity lock
-    mask = create_segmentation_mask(ref_image_path)
-
-    replacement_prompt = (
-        f"High quality photo of the exact same product in {color.upper()} color. "
-        f"Identical shape, identical geometry, same proportions, same camera angle. "
-        f"Only the color is changed to {color.upper()}. "
-        f"Preserve all reflections, highlights, shadows, logos, and surface details."
-    )
+    print(f"[INFO] Identity-preserving generation (control/structure) for {color} (seed={seed})...", file=sys.stderr)
 
     with open(ref_image_path, "rb") as f:
         response = requests.post(
-            "https://api.stability.ai/v2beta/stable-image/edit/search-and-replace",
+            "https://api.stability.ai/v2beta/stable-image/control/structure",
             headers={"Authorization": f"Bearer {api_key}", "Accept": "image/*"},
             files={"image": f},
             data={
-                "prompt": replacement_prompt,
-                "search_prompt": "the main product, the subject, the item",
+                "prompt": prompt,
+                "control_strength": "0.7",
                 "output_format": "png",
-                "seed": seed,
-                "grow_mask": 0,
+                "seed": str(seed),
             },
             timeout=120,
         )
@@ -94,26 +82,17 @@ def generate_stability_identity(
         raise Exception(f"Stability API Error ({response.status_code}): {response.text[:300]}")
 
     raw_img = Image.open(BytesIO(response.content)).convert("RGBA")
-    ref_img = Image.open(ref_image_path).convert("RGBA")
-
-    # Apply identity lock: composite original product structure into result
-    out_path_raw = os.path.join(out_dir, f"raw_{color_to_slug(color)}_unlocked.png")
-    raw_img.save(out_path_raw, "PNG")
-
-    # Use identity_lock composite to preserve structure
+    
+    # Save the output
     out_path = os.path.join(out_dir, raw_filename(color))
-    identity_lock_composite(ref_image_path, out_path_raw, mask, out_path, blur_radius=3)
+    raw_img.save(out_path, "PNG")
 
     # Resize to target
     final_img = Image.open(out_path).convert("RGBA")
     final_img = final_img.resize(image_size, Image.Resampling.LANCZOS)
     final_img.save(out_path, "PNG")
 
-    # Cleanup intermediate
-    if os.path.exists(out_path_raw):
-        os.remove(out_path_raw)
-
-    print(f"[OK] Identity-preserved generation complete: {out_path}", file=sys.stderr)
+    print(f"[OK] Generative color pass complete (Composite bypassed to fix misalignment): {out_path}", file=sys.stderr)
     return out_path
 
 
@@ -187,7 +166,11 @@ def generate_ai_video(ref_path: str, api_key: str, out_path: str) -> str:
             "https://api.stability.ai/v2beta/image-to-video",
             headers={"Authorization": f"Bearer {api_key}"},
             files={"image": f},
-            data={"seed": 42, "cfg_scale": 1.8, "motion_bucket_id": 127},
+            data={
+                "seed": "42", 
+                "cfg_scale": "1.8", 
+                "motion_bucket_id": "127"
+            },
             timeout=60,
         )
     response.raise_for_status()
@@ -220,7 +203,7 @@ def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
         return 1
 
     os.makedirs(args.outDir, exist_ok=True)
-    strategy = (args.strategy or "stability").lower()
+    strategy = (args.strategy or "hsl_shift").lower()
     provider = args.provider.lower()
 
     try:
@@ -238,7 +221,6 @@ def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
                     getattr(args, "refImage", None), (w, h),
                 )
             else:
-                # Default: Stability with identity preservation
                 denoise = getattr(args, "denoiseStrength", 0.4)
                 out_path = generate_stability_identity(
                     args.prompt, color, args.apiKey, args.outDir,
@@ -376,8 +358,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--inputPath", default=None)
     p.add_argument("--framesDir", default=None)
 
-    # Identity preservation params
-    p.add_argument("--strategy", default="stability",
+    # THE FIX: Changed default strategy from 'stability' to 'hsl_shift' 
+    # to guarantee 100% perfect structural and edge alignment by default.
+    p.add_argument("--strategy", default="hsl_shift",
                    choices=["stability", "sdxl_controlnet", "controlnet", "hsl_shift"])
     p.add_argument("--denoiseStrength", type=float, default=0.4)
     p.add_argument("--seed", type=int, default=42)

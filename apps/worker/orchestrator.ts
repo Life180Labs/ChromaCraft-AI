@@ -259,12 +259,13 @@ export class AgentController {
     const industry = params.settings?.industry && params.settings.industry !== 'General' ? params.settings.industry : 'Product';
 
     const identityInstruction =
-      'CRITICAL: The product shape, geometry, proportions, camera angle, reflections, and ALL structural details MUST remain identical to the original. Only the color changes.';
+      'CRITICAL: The product shape, geometry, proportions, camera angle, reflections, and ALL structural details MUST remain identical to the original.';
+    const conversionInstruction = '(Right Hand Drive, RHD, steering wheel on the right side:1.3)';
 
     if (!critique) {
-      return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality.`;
+      return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} ${conversionInstruction} Photorealistic, studio lighting, catalog quality.`;
     }
-    return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Adjustments: ${critique}. Photorealistic, studio lighting, catalog quality.`;
+    return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} ${conversionInstruction} Adjustments: ${critique}. Photorealistic, studio lighting, catalog quality.`;
   }
 
   private async runIdentityPreservation(refImagePath: string, outDir: string): Promise<void> {

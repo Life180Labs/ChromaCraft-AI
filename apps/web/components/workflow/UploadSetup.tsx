@@ -83,18 +83,10 @@ const COLOR_HEX: Record<string, string> = {
 };
 
 const UC1_STANDARD_COLORS = [
-  'White',
-  'Black',
-  'Blue',
-  'Red',
-  'Green',
-  'Brown',
-  'Silver',
-  'Yellow',
-  'Cream',
-  'Pink',
-  'Dark Blue',
-  'Orange',
+  'Pristine White',
+  'Oberon Black',
+  'Electric Blue',
+  'Empress Red',
 ];
 
 export const UploadSetup: React.FC<UploadSetupProps> = ({
