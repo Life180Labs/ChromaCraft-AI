@@ -16,4 +16,5 @@ RUN npx prisma generate --schema=./prisma/schema.prisma
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+# Auto-sync database schema on startup, then start Next.js
+CMD npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss 2>&1 | tail -1 && npm run dev

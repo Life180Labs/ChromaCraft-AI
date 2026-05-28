@@ -30,4 +30,4 @@ RUN npx prisma generate --schema=./prisma/schema.prisma
 # Build TypeScript
 RUN npx tsc worker.ts --target es2022 --module commonjs --esModuleInterop --moduleResolution node
 
-CMD ["node", "worker.js"]
+CMD npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss 2>&1 | tail -1 && node worker.js
