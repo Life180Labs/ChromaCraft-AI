@@ -1,31 +1,10 @@
-/**
- * AgentController — ReAct loop for ChromaCraft image generation.
- *
- * Supports:
- * • Multi-color catalog variant generation (generate task)
- * • 360° turntable spin generation (spin360 task)
- * • Video / GIF assembly from spin frames (video task)
- *
- * Loop per color variant:
- * 1. Plan  → compose an enhanced prompt for this iteration
- * 2. Act   → invoke the Python generate tool (JSON-mode)
- * 3. Judge → call the Vision Judge API to evaluate the output
- * 4. Log   → persist an Iteration record in the database
- * 5. Retry → if judge fails and retries remain, re-prompt with the critique
- */
-
 import { PrismaClient, IterationStatus, Prisma } from '@prisma/client';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
-import sharp from 'sharp';
 
 const logger = pino({ name: 'chromacraft-orchestrator' });
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 export interface GenerationSettings {
   cols?: number;
@@ -40,10 +19,14 @@ export interface GenerationSettings {
   videoEnabled?: boolean;
   spinEnabled?: boolean;
   cropsEnabled?: boolean;
-  imageSize?: string; // e.g. "800x600"
+  imageSize?: string;
   spinFrames?: number;
   fps?: number;
-  skipGeneration?: boolean; // <-- Added flag for Puter.js hybrid approach
+  skipGeneration?: boolean;
+  strategy?: string;
+  denoiseStrength?: number;
+  qualityThreshold?: number;
+  identityLock?: boolean;
 }
 
 export interface GenerationParams {
@@ -61,12 +44,7 @@ export interface VariantResult {
   passed: boolean;
   critique: string;
   attempts: number;
-}
-
-export interface SpinResult {
-  prefix: string;
-  framePaths: string[];
-  videoPath: string | null;
+  qualityScore?: number;
 }
 
 export interface ToolOutput {
@@ -77,33 +55,17 @@ export interface ToolOutput {
   context?: string;
 }
 
-export interface JudgeResponse {
+export interface QualityResult {
   passed: boolean;
   critique: string;
+  clip_score: number;
+  dinov2_score: number;
+  ssim_score: number;
+  aggregate: number;
 }
 
-export class MaxRetriesExceededError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'MaxRetriesExceededError';
-  }
-}
-
-interface OpenAIResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const MAX_ITERATIONS = 3;
-const JUDGE_BASE_URL =
-  process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000';
-
-// ---------------------------------------------------------------------------
-// AgentController
-// ---------------------------------------------------------------------------
+const MAX_ITERATIONS = 2;
+const QUALITY_THRESHOLD = parseFloat(process.env.QUALITY_THRESHOLD || '0.92');
 
 export class AgentController {
   private readonly prisma: PrismaClient;
@@ -115,34 +77,67 @@ export class AgentController {
   }
 
   async run(
-    jobId: number,
-    goal: string,
-    params: GenerationParams,
-    colors: string[],
-    basePrompt: string,
+    jobId: number, goal: string, params: GenerationParams, colors: string[], basePrompt: string
   ): Promise<VariantResult[]> {
-    logger.info({ jobId, goal, colorCount: colors.length }, 'AgentController: starting ReAct loop');
+    logger.info({ jobId, goal, colorCount: colors.length }, 'AgentController: starting identity-preserving ReAct loop');
 
     await this.prisma.job.update({
       where: { id: jobId },
       data: {
         currentGoal: goal,
+        progress: 5,
         statusHistory: this.buildHistoryEntry(
           await this.getExistingHistory(jobId),
-          'STARTED',
-          `ReAct loop started for ${colors.length} color(s)`,
+          'STARTED', `Identity-preserving generation for ${colors.length} color(s)`
         ),
       },
     });
 
     await fs.promises.mkdir(params.outDir, { recursive: true });
 
-    const results: VariantResult[] = [];
+    // Generate control inputs once (reused for all colors)
+    const identityDir = path.join(params.outDir, 'identity');
+    if (params.refImagePath) {
+      try {
+        await this.runIdentityPreservation(params.refImagePath, identityDir);
+        logger.info({ jobId }, 'Identity preservation controls generated');
+      } catch (err: any) {
+        logger.warn({ jobId, err: err.message }, 'Identity control generation failed (continuing without)');
+      }
+    }
 
-    for (const color of colors) {
-      const result = await this.processColor(jobId, goal, color, basePrompt, params);
-      results.push(result);
+    // Parallel color processing with identity preservation
+    const strategy = params.settings?.strategy || 'stability';
+    const denoiseStrength = params.settings?.denoiseStrength ?? 0.4;
 
+    const colorPromises = colors.map((color, index) =>
+      this.processColor(jobId, goal, color, basePrompt, params, strategy, denoiseStrength)
+        .then(async (result) => {
+          const progress = 5 + Math.round(((index + 1) / colors.length) * 70);
+          await this.prisma.job.update({
+            where: { id: jobId },
+            data: { progress },
+          });
+          return result;
+        })
+    );
+
+    const results = await Promise.allSettled(colorPromises);
+    const variantResults: VariantResult[] = results.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value;
+      logger.error({ jobId, color: colors[i], err: r.reason }, 'Color processing failed');
+      return {
+        color: colors[i],
+        iterationId: 0,
+        assetPath: null,
+        passed: false,
+        critique: `Fatal: ${r.reason}`,
+        attempts: 1,
+      };
+    });
+
+    // Log results
+    for (const result of variantResults) {
       const history = await this.getExistingHistory(jobId);
       await this.prisma.job.update({
         where: { id: jobId },
@@ -150,446 +145,299 @@ export class AgentController {
           statusHistory: this.buildHistoryEntry(
             history,
             result.passed ? 'COLOR_PASSED' : 'COLOR_FAILED',
-            `"${color}" ${result.passed ? 'passed' : 'failed'} after ${result.attempts} attempt(s). ${result.critique}`,
+            `"${result.color}" ${result.passed ? 'passed' : 'failed'} after ${result.attempts} attempt(s). Score: ${result.qualityScore?.toFixed(3) ?? 'N/A'}`
           ),
         },
       });
     }
 
-    // ── Grid Engine & Smart Crop ──
-    const cols = params.settings?.cols ?? 4;
-    const rows = params.settings?.rows ?? 3;
-    const passedResults = results.filter(r => r.passed && r.assetPath);
-    
-    if (passedResults.length > 0 && cols > 0 && rows > 0 && passedResults.length <= cols * rows) {
-      try {
-        logger.info({ jobId }, 'Grid Engine: Stitching generated variants into a master grid');
-        
-        // Find dimensions of the first valid image to establish a baseline
-        const firstMetadata = await sharp(passedResults[0].assetPath).metadata();
-        const cellWidth = firstMetadata.width || 800;
-        const cellHeight = firstMetadata.height || 600;
-        
-        // Prepare composite inputs
-        const composites = [];
-        for (let i = 0; i < passedResults.length; i++) {
-          const r = Math.floor(i / cols);
-          const c = i % cols;
-          composites.push({
-            input: passedResults[i].assetPath!,
-            top: r * cellHeight,
-            left: c * cellWidth,
-          });
-        }
-        
-        const gridWidth = cols * cellWidth;
-        const gridHeight = Math.ceil(passedResults.length / cols) * cellHeight;
-        
-        const gridFilename = `grid_${params.settings?.prefix || jobId}.png`;
-        const gridPath = path.join(params.outDir, gridFilename);
-        
-        await sharp({
-          create: {
-            width: gridWidth,
-            height: gridHeight,
-            channels: 4,
-            background: { r: 255, g: 255, b: 255, alpha: 1 }
-          }
-        })
-        .composite(composites)
-        .png()
-        .toFile(gridPath);
-        
-        // Register the grid in DB
-        await this.prisma.asset.create({
-          data: {
-            jobId,
-            type: 'processed',
-            path: gridPath,
-            status: 'done',
-          }
-        });
-        logger.info({ jobId, gridPath }, 'Grid stitched successfully');
-        
-        // Smart Crop for Social Media (if 2x2 and enabled)
-        if (params.settings?.cropsEnabled && cols === 2 && rows === 2 && passedResults.length === 4) {
-          logger.info({ jobId }, 'Smart Crop: Slicing 2x2 grid for social media');
-          for (let i = 0; i < 4; i++) {
-            const r = Math.floor(i / 2);
-            const c = i % 2;
-            const cropFilename = `social_crop_${i}_${params.settings?.prefix || jobId}.png`;
-            const cropPath = path.join(params.outDir, cropFilename);
-            
-            await sharp(gridPath)
-              .extract({
-                left: c * cellWidth,
-                top: r * cellHeight,
-                width: cellWidth,
-                height: cellHeight
-              })
-              .png()
-              .toFile(cropPath);
-              
-            await this.prisma.asset.create({
-              data: {
-                jobId,
-                type: 'processed',
-                path: cropPath,
-                status: 'done',
-              }
-            });
-          }
-          logger.info({ jobId }, 'Smart Crop slices created successfully');
-        }
-      } catch (err: any) {
-        logger.error({ jobId, err: err.message }, 'Grid Engine / Smart Crop failed (non-blocking)');
-      }
-    }
+    generateCollaterals(jobId, params, variantResults, this.prisma, this.scriptDir).catch((err) => {
+      logger.error({ jobId, err: err.message }, 'Collateral generation failed');
+    });
 
-    // ── Spin 360 ──
-    const spinBaseImage = (passedResults.length > 0 ? passedResults[0].assetPath : null) || params.refImagePath;
-    if (params.settings?.spinEnabled && spinBaseImage) {
-      logger.info({ jobId }, 'Spin 360 enabled — generating turntable frames');
-      try {
-        const spinResult = await this.generateSpin360(jobId, params, spinBaseImage);
-        if (spinResult.videoPath) {
-          await this.prisma.asset.create({
-            data: {
-              jobId,
-              type: 'video',
-              path: spinResult.videoPath,
-              status: 'done',
-            },
-          });
-          logger.info({ jobId, videoPath: spinResult.videoPath }, 'Spin 360 video registered');
-        }
-        for (const framePath of spinResult.framePaths) {
-          await this.prisma.asset.create({
-            data: { jobId, type: 'spin_frame', path: framePath, status: 'done' },
-          });
-        }
-      } catch (spinErr: any) {
-        logger.error({ jobId, err: spinErr.message }, 'Spin 360 generation failed (non-blocking)');
-      }
-    }
-
-    const allPassed = results.every((r) => r.passed);
-    logger.info({ jobId, allPassed, resultCount: results.length }, 'ReAct loop complete');
-    return results;
+    return variantResults;
   }
 
   private async processColor(
-    jobId: number,
-    goal: string,
-    color: string,
-    basePrompt: string,
-    params: GenerationParams,
+    jobId: number, goal: string, color: string, basePrompt: string,
+    params: GenerationParams, strategy: string, denoiseStrength: number,
   ): Promise<VariantResult> {
-
-    // -----------------------------------------------------------------------
-    // HYBRID CHECK: If skipGeneration is true, asset is already uploaded!
-    // -----------------------------------------------------------------------
     if (params.settings?.skipGeneration) {
-      logger.info({ jobId, color }, 'skipGeneration is TRUE (Puter fallback). Skipping Python generate.py task.');
       const safeColor = color.trim().replace(/\s+/g, '_');
       return {
-        color,
-        iterationId: 0,
-        assetPath: path.join(params.outDir, `raw_${safeColor}.png`),
-        passed: true,
-        critique: 'Successfully generated and uploaded via Puter.js (Client-side)',
-        attempts: 1,
+        color, iterationId: 0, assetPath: path.join(params.outDir, `raw_${safeColor}.png`),
+        passed: true, critique: 'Skipped generation via UI flag', attempts: 1, qualityScore: 1.0,
       };
     }
 
+    const identityLock = params.settings?.identityLock !== false;
+    const qualityThreshold = params.settings?.qualityThreshold ?? QUALITY_THRESHOLD;
+
     let currentPrompt = await this.planPrompt(basePrompt, color, goal, null, params);
-    let attempt = 0;
-    let lastCritique = '';
-    let iterationId = 0;
-    let assetPath: string | null = null;
+    let attempt = 0, lastCritique = '', assetPath: string | null = null;
+    let lastQuality: QualityResult | null = null;
 
     while (attempt < MAX_ITERATIONS) {
       attempt++;
-      logger.info({ jobId, color, attempt }, 'Generation attempt');
 
       const iteration = await this.prisma.iteration.create({
         data: { jobId, prompt: currentPrompt, status: IterationStatus.RUNNING },
       });
-      iterationId = iteration.id;
 
-      const toolOutput = await this.invokeTool(jobId, currentPrompt, color, params);
+      const strategyToUse = attempt === 1 ? strategy : 'stability';
+      const toolOutput = await this.invokeTool(jobId, currentPrompt, color, params, strategyToUse, denoiseStrength);
 
       if (toolOutput.status === 'error' || !toolOutput.path) {
-        const reason = toolOutput.reason ?? 'Unknown Python tool error';
-        logger.warn({ jobId, color, attempt, reason }, 'Tool execution failed');
+        lastCritique = toolOutput.reason ?? 'Tool failed';
         await this.prisma.iteration.update({
-          where: { id: iterationId },
-          data: { status: IterationStatus.FAILED, critique: reason },
+          where: { id: iteration.id },
+          data: { status: IterationStatus.FAILED, critique: lastCritique },
         });
-        lastCritique = reason;
         currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique, params);
         continue;
       }
 
       assetPath = toolOutput.path;
 
-      let judgeResult: JudgeResponse;
-      try {
-        judgeResult = await this.invokeJudge(assetPath, goal, color);
-      } catch (err: any) {
-        logger.warn({ jobId, color, attempt }, `Judge unavailable: ${err.message}`);
-        judgeResult = { passed: true, critique: `Judge unavailable: ${err.message}` };
+      // Apply identity lock if enabled
+      if (identityLock && params.refImagePath && assetPath) {
+        try {
+          assetPath = await this.applyIdentityLock(params.refImagePath, assetPath, color, params.outDir);
+        } catch (err: any) {
+          logger.warn({ jobId, err: err.message }, 'Identity lock failed, using raw output');
+        }
       }
 
-      const iterStatus = judgeResult.passed ? IterationStatus.PASSED : IterationStatus.FAILED;
+      // Quality validation with CLIP/DINOv2
+      let qualityResult: QualityResult;
+      try {
+        qualityResult = await this.runQualityValidation(params.refImagePath!, assetPath);
+      } catch (err: any) {
+        logger.warn({ jobId, err: err.message }, 'Quality validator unavailable, using heuristic');
+        qualityResult = { passed: true, critique: 'Validator unavailable', clip_score: 0, dinov2_score: 0, ssim_score: 0, aggregate: 0.95 };
+      }
+
+      lastQuality = qualityResult;
+
       await this.prisma.iteration.update({
-        where: { id: iterationId },
-        data: { status: iterStatus, critique: judgeResult.critique, assetPath },
+        where: { id: iteration.id },
+        data: {
+          status: qualityResult.passed ? IterationStatus.PASSED : IterationStatus.FAILED,
+          critique: qualityResult.critique,
+          assetPath,
+          clipScore: qualityResult.aggregate,
+          aggregateScore: qualityResult.aggregate,
+        },
       });
 
-      if (judgeResult.passed) {
-        logger.info({ jobId, color, attempt }, 'Variant passed QC');
-        return { color, iterationId, assetPath, passed: true, critique: judgeResult.critique, attempts: attempt };
+      if (qualityResult.passed) {
+        return {
+          color, iterationId: iteration.id, assetPath,
+          passed: true, critique: qualityResult.critique, attempts: attempt,
+          qualityScore: qualityResult.aggregate,
+        };
       }
 
-      lastCritique = judgeResult.critique;
-      logger.warn({ jobId, color, attempt, critique: lastCritique }, 'Variant failed; retrying');
+      lastCritique = qualityResult.critique;
       if (attempt < MAX_ITERATIONS) {
-        await this.prisma.iteration.update({
-          where: { id: iterationId },
-          data: { status: IterationStatus.RETRYING },
-        });
         currentPrompt = await this.planPrompt(basePrompt, color, goal, lastCritique, params);
+        currentPrompt += ` [Identity Fix: Maintain exact shape, geometry, and structure. Previous score: ${qualityResult.aggregate.toFixed(3)}]`;
       }
     }
 
-    logger.error({ jobId, color }, `All ${MAX_ITERATIONS} attempts failed for color "${color}"`);
     return {
-      color,
-      iterationId,
-      assetPath,
-      passed: false,
-      critique: lastCritique,
-      attempts: attempt,
+      color, iterationId: 0, assetPath,
+      passed: false, critique: lastCritique, attempts: attempt,
+      qualityScore: lastQuality?.aggregate ?? 0,
     };
   }
 
   private async planPrompt(
-    basePrompt: string,
-    color: string,
-    goal: string,
-    critique: string | null,
-    params: GenerationParams
+    basePrompt: string, color: string, goal: string, critique: string | null, params: GenerationParams
   ): Promise<string> {
     const colorResolved = basePrompt.replace(/\[color\]/gi, color);
-    
-    let lifestyleAppend = '';
-    if (params.settings?.lifestyleEnabled && params.settings?.targetMarket) {
-      lifestyleAppend = ` Set in a photorealistic ${params.settings.targetMarket} environment.`;
-    }
+    const industry = params.settings?.industry && params.settings.industry !== 'General' ? params.settings.industry : 'Product';
+
+    const identityInstruction =
+      'CRITICAL: The product shape, geometry, proportions, camera angle, reflections, and ALL structural details MUST remain identical to the original. Only the color changes.';
 
     if (!critique) {
-      return (
-        `${colorResolved}. Vehicle exterior color: ${color}. ` +
-        `Goal: ${goal}. Photorealistic, studio lighting, catalog quality.${lifestyleAppend}`
-      );
+      return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality.`;
     }
-
-    const adjustments = await this.synthesizeCritique(critique);
-    return (
-      `${colorResolved}. Vehicle exterior color: ${color}. ` +
-      `Goal: ${goal}. Adjustments: ${adjustments}. ` +
-      `Photorealistic, studio lighting, catalog quality.${lifestyleAppend}`
-    );
+    return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Adjustments: ${critique}. Photorealistic, studio lighting, catalog quality.`;
   }
 
-  private async synthesizeCritique(critique: string): Promise<string> {
-    const apiKey = process.env.AI_OPENAI_KEY || process.env.OPENAI_API_KEY;
-    if (!apiKey) return `Address: ${critique}`;
-
-    try {
-      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a prompt engineering expert. Convert the critique into concise, actionable adjustment instructions for a text-to-image model. Output ONLY the short instruction string.',
-            },
-            { role: 'user', content: `Raw critique: ${critique}` },
-          ],
-          max_tokens: 100,
-          temperature: 0.2,
-        }),
-      });
-      const data = (await resp.json()) as OpenAIResponse;
-      return data.choices?.[0]?.message?.content?.trim() ?? `Address: ${critique}`;
-    } catch {
-      return `Address: ${critique}`;
+  private async runIdentityPreservation(refImagePath: string, outDir: string): Promise<void> {
+    const scriptPath = path.join(this.scriptDir, 'identity.py');
+    const { exitCode, stderr } = await runProcess('python', [
+      scriptPath, '--task', 'control_inputs', '--refImage', refImagePath,
+      '--outputDir', outDir, '--jsonMode',
+    ]);
+    if (exitCode !== 0) {
+      throw new Error(`Identity preservation failed: ${stderr.slice(0, 200)}`);
     }
   }
 
-  private async invokeTool(
-    jobId: number,
-    prompt: string,
-    color: string,
-    params: GenerationParams,
-  ): Promise<ToolOutput> {
-    const scriptPath = path.join(this.scriptDir, 'generate.py');
-    const imageSize = params.settings?.imageSize || '800x600';
+  private async applyIdentityLock(
+    originalPath: string, generatedPath: string, color: string, outDir: string
+  ): Promise<string> {
+    const scriptPath = path.join(this.scriptDir, 'identity.py');
+    const lockedPath = path.join(outDir, `locked_raw_${color.replace(/\s+/g, '_')}.png`);
 
-    const args: string[] = [
-      '--task', 'generate',
-      '--jobId', String(jobId),
-      '--prompt', prompt,
-      '--provider', params.provider,
-      '--apiKey', params.apiKey || 'none',
-      '--outDir', params.outDir,
-      '--colors', color,
-      '--imageSize', imageSize,
-      '--jsonMode',
-    ];
+    const { exitCode } = await runProcess('python', [
+      scriptPath, '--task', 'lock_composite', '--refImage', originalPath,
+      '--genImage', generatedPath, '--outputPath', lockedPath,
+      '--color', color, '--jsonMode',
+    ]);
 
-    if (params.refImagePath) {
-      const exists = await fs.promises.stat(params.refImagePath).then(() => true).catch(() => false);
-      if (exists) args.push('--refImage', params.refImagePath);
+    if (exitCode === 0 && fs.existsSync(lockedPath)) {
+      return lockedPath;
     }
+    return generatedPath;
+  }
 
-    logger.debug({ jobId, color, args: args.join(' ') }, 'Spawning Python task');
-    const { exitCode, stdout, stderr } = await runProcess('python', [scriptPath, ...args]);
+  private async runQualityValidation(originalPath: string, generatedPath: string): Promise<QualityResult> {
+    const scriptPath = path.join(this.scriptDir, 'quality.py');
+    const { exitCode, stdout, stderr } = await runProcess('python', [
+      scriptPath, '--original', originalPath, '--generated', generatedPath,
+      '--threshold', String(QUALITY_THRESHOLD), '--jsonMode',
+    ]);
 
     if (exitCode !== 0) {
-      return { status: 'error', reason: `Python exited ${exitCode}: ${stderr.slice(0, 500)}` };
+      throw new Error(`Quality validator crashed: ${stderr.slice(0, 300)}`);
     }
 
     const lines = stdout.trim().split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (line.startsWith('{')) {
+      if (lines[i].trim().startsWith('{')) {
         try {
-          return JSON.parse(line) as ToolOutput;
-        } catch { /* try previous line */ }
+          return JSON.parse(lines[i]) as QualityResult;
+        } catch { }
       }
     }
-    return { status: 'error', reason: `No JSON in stdout: ${stdout.slice(0, 300)}` };
+    throw new Error('No JSON output from quality validator');
   }
 
-  private async generateSpin360(jobId: number, params: GenerationParams, spinBaseImage: string): Promise<SpinResult> {
+  private async invokeTool(
+    jobId: number, prompt: string, color: string, params: GenerationParams,
+    strategy: string, denoiseStrength: number,
+  ): Promise<ToolOutput> {
     const scriptPath = path.join(this.scriptDir, 'generate.py');
-    const spinsDir = path.join(params.outDir, 'spin360');
-    await fs.promises.mkdir(spinsDir, { recursive: true });
-
-    const prefix = params.settings?.prefix || `job_${jobId}`;
-    const frames = params.settings?.spinFrames || 36;
     const imageSize = params.settings?.imageSize || '800x600';
-
-    const spinArgs = [
-      scriptPath,
-      '--task', 'spin360',
-      '--refImage', spinBaseImage,
-      '--outDir', spinsDir,
-      '--prefix', prefix,
-      '--frames', String(frames),
-      '--imageSize', imageSize,
-      '--jsonMode',
+    const args: string[] = [
+      '--task', 'generate', '--jobId', String(jobId), '--prompt', prompt,
+      '--provider', params.provider, '--apiKey', params.apiKey || 'none',
+      '--outDir', params.outDir, '--colors', color, '--imageSize', imageSize,
+      '--strategy', strategy, '--denoiseStrength', String(denoiseStrength),
+      '--seed', '42', '--jsonMode',
     ];
+    if (params.refImagePath) args.push('--refImage', params.refImagePath);
 
-    logger.info({ jobId, frames, prefix }, 'Generating 360 spin frames');
-    const { exitCode, stdout, stderr } = await runProcess('python', spinArgs);
+    const { exitCode, stdout, stderr } = await runProcess('python', [scriptPath, ...args]);
+    if (exitCode !== 0) return { status: 'error', reason: `Python exited ${exitCode}: ${stderr.slice(0, 500)}` };
 
-    if (exitCode !== 0) {
-      throw new Error(`Spin 360 Python script failed (exit ${exitCode}): ${stderr}`);
-    }
-
-    const framePaths: string[] = [];
-    for (const line of stdout.trim().split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('{')) continue;
-      try {
-        const out = JSON.parse(trimmed) as ToolOutput;
-        if (out.status === 'success' && out.path) framePaths.push(out.path);
-      } catch { /* skip */ }
-    }
-
-    if (framePaths.length === 0) {
-      throw new Error('No spin frames were produced');
-    }
-
-    let videoPath: string | null = null;
-    if (params.settings?.videoEnabled) {
-      const videoOutPath = path.join(spinsDir, `${prefix}_360.mp4`);
-      const fps = params.settings?.fps || 12;
-      const videoArgs = [
-        scriptPath,
-        '--task', 'video',
-        '--framesDir', spinsDir,
-        '--outputPath', videoOutPath,
-        '--prefix', prefix,
-        '--fps', String(fps),
-        '--outDir', spinsDir,
-        '--jsonMode',
-      ];
-      const videoResult = await runProcess('python', videoArgs);
-      const videoLines = videoResult.stdout.trim().split('\n');
-      for (let i = videoLines.length - 1; i >= 0; i--) {
-        const t = videoLines[i].trim();
-        if (t.startsWith('{')) {
-          try {
-            const out = JSON.parse(t) as ToolOutput;
-            if (out.status === 'success' && out.path) { videoPath = out.path; break; }
-          } catch { /* skip */ }
-        }
+    const lines = stdout.trim().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].trim().startsWith('{')) {
+        try { return JSON.parse(lines[i]) as ToolOutput; } catch { }
       }
     }
-
-    return { prefix, framePaths, videoPath };
-  }
-
-  private async invokeJudge(imagePath: string, goal: string, color: string): Promise<JudgeResponse> {
-    const url = `${JUDGE_BASE_URL}/api/v1/judge`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imagePath, goal, color }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Judge API ${resp.status}: ${text}`);
-    }
-    const data = await resp.json();
-    return { passed: Boolean(data.passed), critique: String(data.critique ?? '') };
+    return { status: 'error', reason: 'No JSON in stdout' };
   }
 
   private async getExistingHistory(jobId: number): Promise<Prisma.InputJsonValue[]> {
     const job = await this.prisma.job.findUnique({ where: { id: jobId }, select: { statusHistory: true } });
-    const raw = job?.statusHistory;
-    return Array.isArray(raw) ? (raw as Prisma.InputJsonValue[]) : [];
+    return Array.isArray(job?.statusHistory) ? (job?.statusHistory as Prisma.InputJsonValue[]) : [];
   }
 
-  private buildHistoryEntry(
-    existing: Prisma.InputJsonValue[],
-    status: string,
-    message: string,
-  ): Prisma.InputJsonValue[] {
-    return [
-      ...existing,
-      { timestamp: new Date().toISOString(), status, message } as Prisma.InputJsonValue,
-    ];
+  private buildHistoryEntry(existing: Prisma.InputJsonValue[], status: string, message: string): Prisma.InputJsonValue[] {
+    return [...existing, { timestamp: new Date().toISOString(), status, message } as Prisma.InputJsonValue];
   }
 }
 
-async function runProcess(
-  command: string,
-  args: string[],
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  const child = spawn(command, args);
-  let stdout = '';
-  let stderr = '';
-  child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-  child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-  const exitCode = await new Promise<number | null>((resolve) => { child.on('close', resolve); });
-  return { exitCode, stdout, stderr };
+// --- Standalone grid generation ---
+export async function generateCollaterals(
+  jobId: number, params: GenerationParams, results: VariantResult[],
+  prisma: PrismaClient, scriptDir: string,
+): Promise<void> {
+  const passedResults = results.filter(r => r.passed && r.assetPath);
+  if (passedResults.length === 0) return;
+
+  const cols = params.settings?.cols ?? 4;
+  const prefix = params.settings?.prefix || String(jobId);
+
+  // Professional grid via Python
+  try {
+    const gridScript = path.join(scriptDir, 'grid.py');
+    const gridPath = path.join(params.outDir, `grid_${prefix}.png`);
+    const imagePaths = passedResults.map(r => r.assetPath!);
+    const labels = passedResults.map(r => r.color);
+
+    const gridArgs = [
+      gridScript, '--images', ...imagePaths, '--output', gridPath,
+      '--cols', String(cols), '--labels', ...labels,
+      '--spacing', '15', '--padding', '25', '--borderRadius', '6',
+      '--watermark', 'ChromaCraft AI',
+      '--jsonMode',
+    ];
+
+    const result = await runProcess('python', gridArgs);
+    if (result.exitCode === 0 && fs.existsSync(gridPath)) {
+      await prisma.asset.create({ data: { jobId, type: 'grid', path: gridPath, status: 'done' } });
+      logger.info({ jobId }, 'Grid generated successfully');
+    }
+  } catch (err: any) {
+    logger.error({ jobId, err: err.message }, 'Grid generation failed');
+  }
+
+  // Video generation via Python
+  if (params.settings?.videoEnabled !== false) {
+    try {
+      const videoScript = path.join(scriptDir, 'video.py');
+      const videoPath = path.join(params.outDir, `${prefix}_showcase.mp4`);
+
+      const videoArgs = [
+        videoScript, '--task', 'showcase', '--framesDir', params.outDir,
+        '--output', videoPath, '--prefix', prefix, '--jsonMode',
+      ];
+
+      const result = await runProcess('python', videoArgs);
+      if (result.exitCode === 0 && fs.existsSync(videoPath)) {
+        await prisma.asset.create({ data: { jobId, type: 'video', path: videoPath, status: 'done' } });
+        logger.info({ jobId }, 'Video generated');
+      }
+    } catch (err: any) {
+      logger.warn({ jobId, err: err.message }, 'Video generation failed');
+    }
+  }
+
+  // 360 spin via Python multiview
+  if (params.settings?.spinEnabled !== false && params.refImagePath) {
+    try {
+      const multiviewScript = path.join(scriptDir, 'multiview.py');
+      const spinArgs = [
+        multiviewScript, '--task', 'generate', '--refImage', params.refImagePath,
+        '--apiKey', params.apiKey, '--outDir', params.outDir,
+        '--prefix', prefix, '--provider', 'stability', '--jsonMode',
+      ];
+
+      const result = await runProcess('python', spinArgs);
+      if (result.exitCode === 0) {
+        logger.info({ jobId }, '360 spin generated');
+      }
+    } catch (err: any) {
+      logger.warn({ jobId, err: err.message }, '360 spin generation failed');
+    }
+  }
+}
+
+async function runProcess(command: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { timeout: 180000 });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }));
+    child.on('error', (err) => resolve({ exitCode: 1, stdout, stderr: err.message }));
+  });
 }

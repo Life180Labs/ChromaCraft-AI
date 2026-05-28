@@ -14,11 +14,7 @@ enum JobStatus {
   QA_PENDING
   COMPLETED
   FAILED
-}
-
-enum JobType {
-  CATALOG_VARIANTS
-  LIFESTYLE_SCENES
+  CANCELLED
 }
 
 enum IterationStatus {
@@ -28,16 +24,29 @@ enum IterationStatus {
   RETRYING
 }
 
+enum JobType {
+  CATALOG_VARIANTS
+  LIFESTYLE_SCENES
+}
+
 enum Role {
   ADMIN
   USER
+}
+
+enum GenerationStrategy {
+  STABILITY_SEARCH_REPLACE
+  SDXL_CONTROLNET
+  FLUX_REDUX
+  HUE_SHIFT
+  GPT_IMAGE_EDIT
 }
 
 model User {
   id            Int             @id @default(autoincrement())
   email         String          @unique
   passwordHash  String?
-  twoFactorEnabled Boolean @default(false)
+  twoFactorEnabled Boolean      @default(false)
   name          String?
   emailVerified DateTime?
   image         String?
@@ -51,33 +60,50 @@ model User {
 }
 
 model Job {
-  id          Int        @id @default(autoincrement())
-  name        String
-  jobType     JobType    @default(CATALOG_VARIANTS)
-  status      JobStatus  @default(PENDING)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  userId      Int
-  user        User       @relation(fields: [userId], references: [id])
-  assets      Asset[]
-  promptId    Int?       @unique
-  prompt      PromptTemplate? @relation(fields: [promptId], references: [id])
-  generation  Generation?
-  providerId  Int?
-  provider    AiProvider? @relation(fields: [providerId], references: [id])
-  
-  currentGoal   String?
-  statusHistory Json?
-  iterations    Iteration[]
+  id             Int               @id @default(autoincrement())
+  name           String
+  jobType        JobType           @default(CATALOG_VARIANTS)
+  status         JobStatus         @default(PENDING)
+  currentGoal    String?
+  statusHistory  Json?
+  progress       Float             @default(0)
+  errorMessage   String?
+  errorStack     String?
+  retryCount     Int               @default(0)
+  maxRetries     Int               @default(3)
+  storagePrefix  String?
+  scheduledAt    DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  userId         Int
+  user           User              @relation(fields: [userId], references: [id])
+  assets         Asset[]
+  iterations     Iteration[]
+  events         JobEvent[]
+  promptId       Int?              @unique
+  prompt         PromptTemplate?   @relation(fields: [promptId], references: [id])
+  generation     Generation?
+  generationConfig GenerationConfig?
+  providerId     Int?
+  provider       AiProvider?       @relation(fields: [providerId], references: [id])
 }
 
 model Asset {
-  id        Int      @id @default(autoincrement())
-  type      String   // e.g., "original", "variant", "processed"
-  path      String
-  status    String   // e.g., "pending", "done", "error"
-  jobId     Int
-  job       Job      @relation(fields: [jobId], references: [id])
+  id               Int      @id @default(autoincrement())
+  type             String
+  path             String
+  status           String
+  clipScore        Float?
+  dinov2Score      Float?
+  ssimScore        Float?
+  aggregateScore   Float?
+  originalAssetId  Int?
+  originalAsset    Asset?   @relation("AssetVersions", fields: [originalAssetId], references: [id])
+  versions         Asset[]  @relation("AssetVersions")
+  jobId            Int
+  job              Job      @relation(fields: [jobId], references: [id])
 }
 
 model PromptTemplate {
@@ -94,6 +120,23 @@ model Generation {
   job      Job      @relation(fields: [jobId], references: [id])
 }
 
+model GenerationConfig {
+  id                Int                @id @default(autoincrement())
+  jobId             Int                @unique
+  job               Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  strategy          GenerationStrategy @default(STABILITY_SEARCH_REPLACE)
+  denoiseStrength   Float              @default(0.4)
+  controlNetEnabled Boolean            @default(true)
+  identityLock      Boolean            @default(true)
+  seed              Int?
+  colors            Json
+  gridCols          Int                @default(4)
+  gridRows          Int                @default(3)
+  spinFrames        Int                @default(36)
+  qualityThreshold  Float              @default(0.92)
+  createdAt         DateTime           @default(now())
+}
+
 model Iteration {
   id         Int             @id @default(autoincrement())
   jobId      Int
@@ -102,7 +145,19 @@ model Iteration {
   critique   String?
   status     IterationStatus @default(RUNNING)
   assetPath  String?
+  clipScore  Float?
+  aggregateScore Float?
   createdAt  DateTime        @default(now())
+}
+
+model JobEvent {
+  id        Int      @id @default(autoincrement())
+  jobId     Int
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  event     String
+  message   String?
+  metadata  Json?
+  timestamp DateTime @default(now())
 }
 
 model PasswordReset {
@@ -134,9 +189,7 @@ model Account {
   scope              String?
   id_token           String?  @db.Text
   session_state      String?
-
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([provider, providerAccountId])
 }
 
@@ -152,6 +205,5 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
-
   @@unique([identifier, token])
 }
