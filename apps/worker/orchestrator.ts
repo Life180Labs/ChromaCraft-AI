@@ -199,15 +199,9 @@ export class AgentController {
 
       assetPath = toolOutput.path;
 
-      // Apply identity lock if enabled
-      if (identityLock && params.refImagePath && assetPath) {
-        try {
-          assetPath = await this.applyIdentityLock(params.refImagePath, assetPath, color, params.outDir);
-        } catch (err: any) {
-          logger.warn({ jobId, err: err.message }, 'Identity lock failed, using raw output');
-        }
-      }
-
+      // Identity lock via pixel composite is disabled for LHD->RHD & recoloring.
+      // The ControlNet endpoint naturally preserves structure without pixel pasting.
+      
       // Quality validation with CLIP/DINOv2
       let qualityResult: QualityResult;
       try {
