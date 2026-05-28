@@ -19,10 +19,18 @@ import { ProfileSettings } from '../components/profile/ProfileSettings';
 import { TopBar } from '../components/layout/TopBar';
 
 const UC1_STANDARD_COLORS = [
-  'Pristine White',
-  'Oberon Black',
-  'Electric Blue',
-  'Empress Red',
+  'White',
+  'Black',
+  'Blue',
+  'Red',
+  'Green',
+  'Brown',
+  'Silver',
+  'Yellow',
+  'Cream',
+  'Pink',
+  'Dark Blue',
+  'Orange',
 ];
 
 export default function Home() {
@@ -47,8 +55,8 @@ export default function Home() {
   const [targetPurpose, setTargetPurpose] = useState<string>('Product catalog');
   
   // Output steps & color configuration
-  const [gridCols, setGridCols] = useState<number>(2);
-  const [gridRows, setGridRows] = useState<number>(2);
+  const [gridCols, setGridCols] = useState<number>(4);
+  const [gridRows, setGridRows] = useState<number>(3);
   const [lifestyleEnabled, setLifestyleEnabled] = useState<boolean>(false);
   const [videoEnabled, setVideoEnabled] = useState<boolean>(false);
   const [spinEnabled, setSpinEnabled] = useState<boolean>(false);
