@@ -1,11 +1,10 @@
 import { Worker, Queue, Job as BullJob } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
-import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import dotenv from 'dotenv';
-import { AgentController, GenerationParams, GenerationSettings, VariantResult, generateCollaterals } from './orchestrator';
+import { AgentController, GenerationParams, GenerationSettings, VariantResult, generateCollaterals, runProcess } from './orchestrator';
 
 let envPath = path.resolve(process.cwd(), '.env');
 if (!fs.existsSync(envPath)) envPath = path.resolve(process.cwd(), '../../.env');
@@ -29,7 +28,8 @@ if (process.env.REDIS_URL) {
 
 const redisConfig = { host: redisHost, port: redisPort, password: redisPassword };
 
-export const UC1_STANDARD_COLORS = [
+// Default 12-color palette for catalog generation
+export const DEFAULT_COLORS = [
   'White', 'Black', 'Blue', 'Red', 'Green', 'Brown',
   'Silver', 'Yellow', 'Cream', 'Pink', 'Dark Blue', 'Orange',
 ] as const;
@@ -58,12 +58,7 @@ function resolveStoragePaths(jobId: number) {
 
 async function runPythonScript(scriptName: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   const scriptPath = path.join(process.cwd(), 'python', scriptName);
-  const proc = spawn('python', [scriptPath, ...args], { timeout: 180000 });
-  let stdout = '', stderr = '';
-  proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-  proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-  const exitCode = await new Promise<number | null>((resolve) => { proc.on('close', resolve); });
-  return { exitCode, stdout, stderr };
+  return runProcess('python', [scriptPath, ...args]);
 }
 
 async function markJobFailed(jobId: number, context: string, err: unknown) {
@@ -96,6 +91,25 @@ async function logJobEvent(jobId: number, event: string, message: string, metada
   } catch { }
 }
 
+// --- Stale job recovery on startup ---
+(async function recoverStaleJobs() {
+  const staleThreshold = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes
+  const stale = await prisma.job.findMany({
+    where: {
+      status: 'PROCESSING',
+      startedAt: { lt: staleThreshold },
+    },
+  });
+  for (const job of stale) {
+    logger.warn({ jobId: job.id }, 'Recovering stale PROCESSING job → FAILED');
+    await prisma.job.update({
+      where: { id: job.id },
+      data: { status: 'FAILED', errorMessage: 'Stale job auto-recovered after 30min timeout', completedAt: new Date() },
+    });
+    await logJobEvent(job.id, 'STALE_RECOVERY', 'Job auto-failed after 30min without completion');
+  }
+})().catch(err => logger.error({ err: err.message }, 'Stale job recovery failed'));
+
 // --- Upload Worker ---
 const uploadWorker = new Worker('upload', async (job: BullJob) => {
   const { jobId, assetId } = job.data;
@@ -117,7 +131,7 @@ const generateWorker = new Worker('generate', async (job: BullJob<GenerateJobDat
     const { jobAssetDir } = resolveStoragePaths(jobId);
     fs.mkdirSync(jobAssetDir, { recursive: true });
 
-    let colors: string[] = (settings?.colors && settings.colors.length > 0) ? settings.colors : [...UC1_STANDARD_COLORS];
+    let colors: string[] = (settings?.colors && settings.colors.length > 0) ? settings.colors : [...DEFAULT_COLORS];
     const gridSize = (settings?.cols ?? 4) * (settings?.rows ?? 3);
     if (colors.length > gridSize) colors = colors.slice(0, gridSize);
 

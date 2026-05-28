@@ -66,6 +66,25 @@ export interface QualityResult {
 
 const MAX_ITERATIONS = 2;
 const QUALITY_THRESHOLD = parseFloat(process.env.QUALITY_THRESHOLD || '0.92');
+const COLOR_CONCURRENCY = parseInt(process.env.COLOR_CONCURRENCY || '3', 10);
+
+class Semaphore {
+  private current = 0;
+  private queue: (() => void)[] = [];
+  constructor(private max: number) {}
+  async acquire(): Promise<void> {
+    if (this.current < this.max) { this.current++; return; }
+    return new Promise(resolve => this.queue.push(resolve));
+  }
+  release(): void {
+    const next = this.queue.shift();
+    if (next) { next(); } else { this.current--; }
+  }
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try { return await fn(); } finally { this.release(); }
+  }
+}
 
 export class AgentController {
   private readonly prisma: PrismaClient;
@@ -106,20 +125,21 @@ export class AgentController {
       }
     }
 
-    // Parallel color processing with identity preservation
+    // Parallel color processing with concurrency throttle
     const strategy = params.settings?.strategy || 'stability';
     const denoiseStrength = params.settings?.denoiseStrength ?? 0.4;
-
+    const semaphore = new Semaphore(COLOR_CONCURRENCY);
     const colorPromises = colors.map((color, index) =>
-      this.processColor(jobId, goal, color, basePrompt, params, strategy, denoiseStrength)
-        .then(async (result) => {
-          const progress = 5 + Math.round(((index + 1) / colors.length) * 70);
-          await this.prisma.job.update({
-            where: { id: jobId },
-            data: { progress },
-          });
-          return result;
-        })
+      semaphore.run(() =>
+        this.processColor(jobId, goal, color, basePrompt, params, strategy, denoiseStrength)
+      ).then(async (result) => {
+        const progress = 5 + Math.round(((index + 1) / colors.length) * 70);
+        await this.prisma.job.update({
+          where: { id: jobId },
+          data: { progress },
+        });
+        return result;
+      })
     );
 
     const results = await Promise.allSettled(colorPromises);
@@ -272,24 +292,6 @@ export class AgentController {
     }
   }
 
-  private async applyIdentityLock(
-    originalPath: string, generatedPath: string, color: string, outDir: string
-  ): Promise<string> {
-    const scriptPath = path.join(this.scriptDir, 'identity.py');
-    const lockedPath = path.join(outDir, `locked_raw_${color.replace(/\s+/g, '_')}.png`);
-
-    const { exitCode } = await runProcess('python', [
-      scriptPath, '--task', 'lock_composite', '--refImage', originalPath,
-      '--genImage', generatedPath, '--outputPath', lockedPath,
-      '--color', color, '--jsonMode',
-    ]);
-
-    if (exitCode === 0 && fs.existsSync(lockedPath)) {
-      return lockedPath;
-    }
-    return generatedPath;
-  }
-
   private async runQualityValidation(originalPath: string, generatedPath: string): Promise<QualityResult> {
     const scriptPath = path.join(this.scriptDir, 'quality.py');
     const { exitCode, stdout, stderr } = await runProcess('python', [
@@ -320,14 +322,16 @@ export class AgentController {
     const imageSize = params.settings?.imageSize || '800x600';
     const args: string[] = [
       '--task', 'generate', '--jobId', String(jobId), '--prompt', prompt,
-      '--provider', params.provider, '--apiKey', params.apiKey || 'none',
+      '--provider', params.provider,
       '--outDir', params.outDir, '--colors', color, '--imageSize', imageSize,
       '--strategy', strategy, '--denoiseStrength', String(denoiseStrength),
       '--seed', '42', '--jsonMode',
     ];
     if (params.refImagePath) args.push('--refImage', params.refImagePath);
 
-    const { exitCode, stdout, stderr } = await runProcess('python', [scriptPath, ...args]);
+    const { exitCode, stdout, stderr } = await runProcess('python', [scriptPath, ...args], {
+      env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
+    });
     if (exitCode !== 0) return { status: 'error', reason: `Python exited ${exitCode}: ${stderr.slice(0, 500)}` };
 
     const lines = stdout.trim().split('\n');
@@ -395,7 +399,9 @@ export async function generateCollaterals(
         '--output', videoPath, '--prefix', prefix, '--jsonMode',
       ];
 
-      const result = await runProcess('python', videoArgs);
+      const result = await runProcess('python', videoArgs, {
+        env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
+      });
       if (result.exitCode === 0 && fs.existsSync(videoPath)) {
         await prisma.asset.create({ data: { jobId, type: 'video', path: videoPath, status: 'done' } });
         logger.info({ jobId }, 'Video generated');
@@ -411,11 +417,13 @@ export async function generateCollaterals(
       const multiviewScript = path.join(scriptDir, 'multiview.py');
       const spinArgs = [
         multiviewScript, '--task', 'generate', '--refImage', params.refImagePath,
-        '--apiKey', params.apiKey, '--outDir', params.outDir,
+        '--outDir', params.outDir,
         '--prefix', prefix, '--provider', 'stability', '--jsonMode',
       ];
 
-      const result = await runProcess('python', spinArgs);
+      const result = await runProcess('python', spinArgs, {
+        env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
+      });
       if (result.exitCode === 0) {
         logger.info({ jobId }, '360 spin generated');
       }
@@ -425,9 +433,9 @@ export async function generateCollaterals(
   }
 }
 
-async function runProcess(command: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+export async function runProcess(command: string, args: string[], opts?: { env?: Record<string, string | undefined> }): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { timeout: 180000 });
+    const child = spawn(command, args, { timeout: 180000, env: opts?.env ?? process.env });
     let stdout = '', stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });

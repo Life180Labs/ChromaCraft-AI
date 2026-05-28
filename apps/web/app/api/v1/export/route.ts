@@ -7,7 +7,10 @@ import { Readable } from 'stream';
 import crypto from 'crypto';
 import path from 'path';
 
-const SECRET = process.env.NEXTAUTH_SECRET || 'fallback-secret-for-chromacraft-export-token-signing';
+if (!process.env.NEXTAUTH_SECRET) {
+  throw new Error('NEXTAUTH_SECRET must be set for export token signing');
+}
+const SECRET = process.env.NEXTAUTH_SECRET;
 
 function generateSignedToken(jobId: number, expiryMs: number): { token: string; expiresAt: number } {
   const expiresAt = Date.now() + expiryMs;

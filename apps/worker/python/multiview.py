@@ -27,11 +27,20 @@ def color_to_slug(color: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "_" for c in color.strip().replace(" ", "_"))
 
 
+def _resolve_api_key(cli_key: str) -> str:
+    if cli_key and cli_key != "none":
+        return cli_key
+    return os.environ.get("CHROMACRAFT_API_KEY", "none")
+
+
 def generate_with_tripo(ref_image_path: str, api_key: str, out_dir: str, prefix: str = "product") -> dict:
     """
     Use Tripo AI API for actual 3D reconstruction and multi-view rendering.
     Best quality, supports turntable video export.
     """
+    api_key = _resolve_api_key(api_key)
+    if api_key == "none":
+        raise ValueError("Tripo AI API key required. Set CHROMACRAFT_API_KEY env var.")
     headers = {"Authorization": f"Bearer {api_key}"}
 
     # Step 1: Upload image
@@ -105,6 +114,9 @@ def generate_with_stability_video(ref_image_path: str, api_key: str, out_dir: st
     Fallback: use Stability AI image-to-video, then extract frames.
     Less accurate than Tripo but works with existing API key.
     """
+    api_key = _resolve_api_key(api_key)
+    if api_key == "none":
+        raise ValueError("Stability API key required for video generation. Set CHROMACRAFT_API_KEY env var.")
     # Step 1: Generate video
     with open(ref_image_path, "rb") as f:
         resp = requests.post(

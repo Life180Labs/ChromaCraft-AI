@@ -47,6 +47,14 @@ def raw_filename(color: str) -> str:
 # Strategy 1: Stability Search & Replace with Identity Lock (Preferred)
 # ---------------------------------------------------------------------------
 
+def _resolve_api_key(cli_key: str) -> str:
+    """CLI flag takes priority, then env var."""
+    if cli_key and cli_key != "none":
+        return cli_key
+    env_key = os.environ.get("CHROMACRAFT_API_KEY", "none")
+    return env_key if env_key else "none"
+
+
 def generate_stability_identity(
     prompt: str, color: str, api_key: str, out_dir: str,
     ref_image_path: Optional[str] = None,
@@ -56,11 +64,13 @@ def generate_stability_identity(
 ) -> str:
     """
     Identity-preserving generation using Stability AI ControlNet Structure.
-    - Uses stable-image/control/structure
-    - Fixed seed for consistency
     """
     if not ref_image_path or not os.path.isfile(ref_image_path):
         raise ValueError(f"Reference image not found at '{ref_image_path}'. Generation aborted.")
+
+    api_key = _resolve_api_key(api_key)
+    if api_key == "none":
+        raise ValueError("Stability API key required. Set CHROMACRAFT_API_KEY env var or pass --apiKey.")
 
     print(f"[INFO] Identity-preserving generation (control/structure) for {color} (seed={seed})...", file=sys.stderr)
 
@@ -82,17 +92,12 @@ def generate_stability_identity(
         raise Exception(f"Stability API Error ({response.status_code}): {response.text[:300]}")
 
     raw_img = Image.open(BytesIO(response.content)).convert("RGBA")
+    raw_img = raw_img.resize(image_size, Image.Resampling.LANCZOS)
     
-    # Save the output
     out_path = os.path.join(out_dir, raw_filename(color))
     raw_img.save(out_path, "PNG")
 
-    # Resize to target
-    final_img = Image.open(out_path).convert("RGBA")
-    final_img = final_img.resize(image_size, Image.Resampling.LANCZOS)
-    final_img.save(out_path, "PNG")
-
-    print(f"[OK] Generative color pass complete (Composite bypassed to fix misalignment): {out_path}", file=sys.stderr)
+    print(f"[OK] Generative color pass complete: {out_path}", file=sys.stderr)
     return out_path
 
 
@@ -157,9 +162,10 @@ GENERATION_STRATEGIES = {
 # AI Video & 360 Generation (Stability SVD)
 # ---------------------------------------------------------------------------
 
-def generate_ai_video(ref_path: str, api_key: str, out_path: str) -> str:
-    if api_key == "none" or not api_key:
-        raise ValueError("A valid Stability API key is required for AI video generation.")
+def generate_ai_video(ref_path: str, out_path: str) -> str:
+    api_key = _resolve_api_key("none")
+    if api_key == "none":
+        raise ValueError("A valid Stability API key is required for AI video generation. Set CHROMACRAFT_API_KEY env var.")
 
     with open(ref_path, "rb") as f:
         response = requests.post(
@@ -240,20 +246,21 @@ def task_spin360(args: argparse.Namespace, json_mode: bool) -> int:
     ref = getattr(args, "refImage", None) or getattr(args, "inputPath", None)
     prefix = getattr(args, "prefix", "product")
 
-    # Call multiview.py as subprocess
+    # Call multiview.py as subprocess (API key passed via env for security)
     multiview_script = os.path.join(os.path.dirname(__file__), "multiview.py")
+    env = os.environ.copy()
+    env["CHROMACRAFT_API_KEY"] = args.apiKey
     cmd = [
         "python", multiview_script,
         "--task", "generate",
         "--refImage", ref,
-        "--apiKey", args.apiKey,
         "--outDir", args.outDir,
         "--prefix", prefix,
         "--provider", "stability" if "stability" in args.apiKey.lower() else "tripo",
         "--jsonMode",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
 
     # Parse JSON output from last line
     for line in reversed(result.stdout.strip().split("\n")):
@@ -283,9 +290,10 @@ def task_video(args: argparse.Namespace, json_mode: bool) -> int:
     frames_dir = getattr(args, "framesDir", args.outDir)
 
     video_script = os.path.join(os.path.dirname(__file__), "video.py")
+    env = os.environ.copy()
+    env["CHROMACRAFT_API_KEY"] = args.apiKey
 
     if ref and os.path.isfile(ref):
-        # Simple video from single image
         cmd = [
             "python", video_script,
             "--task", "simple",
@@ -294,7 +302,6 @@ def task_video(args: argparse.Namespace, json_mode: bool) -> int:
             "--jsonMode",
         ]
     else:
-        # Showcase from frames directory
         cmd = [
             "python", video_script,
             "--task", "showcase",
@@ -304,7 +311,7 @@ def task_video(args: argparse.Namespace, json_mode: bool) -> int:
             "--jsonMode",
         ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
 
     for line in reversed(result.stdout.strip().split("\n")):
         line = line.strip()
@@ -358,8 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--inputPath", default=None)
     p.add_argument("--framesDir", default=None)
 
-    # THE FIX: Changed default strategy from 'stability' to 'hsl_shift' 
-    # to guarantee 100% perfect structural and edge alignment by default.
+    # Default to hsl_shift when running CLI manually (pipeline always passes strategy explicitly)
     p.add_argument("--strategy", default="hsl_shift",
                    choices=["stability", "sdxl_controlnet", "controlnet", "hsl_shift"])
     p.add_argument("--denoiseStrength", type=float, default=0.4)

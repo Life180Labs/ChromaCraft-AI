@@ -68,30 +68,28 @@ def ssim(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -> float:
     c1 = (k1 * L) ** 2
     c2 = (k2 * L) ** 2
 
-    mu1 = cv2_filter(img1, win_size)
-    mu2 = cv2_filter(img2, win_size)
+    mu1 = uniform_filter(img1, win_size)
+    mu2 = uniform_filter(img2, win_size)
     mu1_sq = mu1 ** 2
     mu2_sq = mu2 ** 2
     mu1_mu2 = mu1 * mu2
 
-    sigma1_sq = cv2_filter(img1 ** 2, win_size) - mu1_sq
-    sigma2_sq = cv2_filter(img2 ** 2, win_size) - mu2_sq
-    sigma12 = cv2_filter(img1 * img2, win_size) - mu1_mu2
+    sigma1_sq = uniform_filter(img1 ** 2, win_size) - mu1_sq
+    sigma2_sq = uniform_filter(img2 ** 2, win_size) - mu2_sq
+    sigma12 = uniform_filter(img1 * img2, win_size) - mu1_mu2
 
     ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / \
                ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
     return float(np.mean(ssim_map))
 
 
-def cv2_filter(img: np.ndarray, win_size: int) -> np.ndarray:
-    """Simple uniform filter (approximation of cv2.GaussianBlur)."""
-    kernel = np.ones((win_size, win_size), dtype=np.float64) / (win_size * win_size)
+def uniform_filter(img: np.ndarray, win_size: int) -> np.ndarray:
+    """Box filter via summed-area table (vectorized, O(1) per pixel)."""
     pad = win_size // 2
-    padded = np.pad(img, pad, mode='reflect')
-    result = np.zeros_like(img)
-    for i in range(img.shape[0]):
-        for j in range(img.shape[1]):
-            result[i, j] = np.sum(padded[i:i + win_size, j:j + win_size] * kernel)
+    padded = np.pad(img.astype(np.float64), pad, mode='reflect')
+    cumsum = np.cumsum(np.cumsum(padded, axis=0), axis=1)
+    result = (cumsum[win_size:, win_size:] + cumsum[:-win_size, :-win_size]
+              - cumsum[win_size:, :-win_size] - cumsum[:-win_size, win_size:]) / (win_size * win_size)
     return result
 
 
@@ -172,14 +170,20 @@ def clip_score(img1: Image.Image, img2: Image.Image) -> float:
 
 
 # ---------------------------------------------------------------------------
-# DINOv2 Score
+# DINOv2 Score (globally cached)
 # ---------------------------------------------------------------------------
 
-def dinov2_score(img1: Image.Image, img2: Image.Image) -> float:
-    """DINOv2 embedding cosine similarity."""
-    if not DINOV2_AVAILABLE:
-        return 0.0
+_loaded_dinov2_model = None
+_dinov2_transform = None
 
+
+def _load_dinov2():
+    global _loaded_dinov2_model, _dinov2_transform, DINOV2_AVAILABLE
+    if _loaded_dinov2_model is not None:
+        return _loaded_dinov2_model, _dinov2_transform
+    if not TORCH_AVAILABLE:
+        DINOV2_AVAILABLE = False
+        return None, None
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14', pretrained=True)
@@ -194,6 +198,24 @@ def dinov2_score(img1: Image.Image, img2: Image.Image) -> float:
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
+        _loaded_dinov2_model = model
+        _dinov2_transform = transform
+        DINOV2_AVAILABLE = True
+        return model, transform
+    except Exception as e:
+        print(f"[WARN] DINOv2 model load failed: {e}", file=sys.stderr)
+        DINOV2_AVAILABLE = False
+        return None, None
+
+
+def dinov2_score(img1: Image.Image, img2: Image.Image) -> float:
+    """DINOv2 embedding cosine similarity (globally cached model)."""
+    model, transform = _load_dinov2()
+    if model is None:
+        return 0.0
+
+    try:
+        device = next(model.parameters()).device
         with torch.no_grad():
             t1 = transform(img1.convert("RGB")).unsqueeze(0).to(device)
             t2 = transform(img2.convert("RGB")).unsqueeze(0).to(device)
@@ -201,7 +223,6 @@ def dinov2_score(img1: Image.Image, img2: Image.Image) -> float:
             emb1 = model(t1)
             emb2 = model(t2)
 
-            # Use patch-level features for structural similarity
             emb1 = emb1.mean(dim=1)
             emb2 = emb2.mean(dim=1)
 
@@ -222,11 +243,11 @@ def dinov2_score(img1: Image.Image, img2: Image.Image) -> float:
 def histogram_similarity(img1: np.ndarray, img2: np.ndarray) -> float:
     """Compare color histograms as a fast structural proxy."""
     if len(img1.shape) == 3:
-        h1 = cv2_calc_hist(img1)
-        h2 = cv2_calc_hist(img2)
+        h1 = calc_hist(img1)
+        h2 = calc_hist(img2)
     else:
-        h1 = cv2_calc_hist_gray(img1)
-        h2 = cv2_calc_hist_gray(img2)
+        h1 = calc_hist_gray(img1)
+        h2 = calc_hist_gray(img2)
 
     # Correlation
     h1 = h1 / (h1.sum() + 1e-10)
@@ -235,7 +256,7 @@ def histogram_similarity(img1: np.ndarray, img2: np.ndarray) -> float:
     return score
 
 
-def cv2_calc_hist(img: np.ndarray, bins: int = 32) -> np.ndarray:
+def calc_hist(img: np.ndarray, bins: int = 32) -> np.ndarray:
     """Compute flattened color histogram."""
     hists = []
     for c in range(min(img.shape[2], 3)):
@@ -244,7 +265,7 @@ def cv2_calc_hist(img: np.ndarray, bins: int = 32) -> np.ndarray:
     return np.concatenate(hists)
 
 
-def cv2_calc_hist_gray(img: np.ndarray, bins: int = 32) -> np.ndarray:
+def calc_hist_gray(img: np.ndarray, bins: int = 32) -> np.ndarray:
     hist, _ = np.histogram(img, bins=bins, range=(0, 256))
     return hist.astype(np.float64)
 
@@ -287,7 +308,7 @@ class QualityValidator:
 
             # Sizes must match for pixel-level metrics
             if orig_np.shape != gen_np.shape:
-                gen_np = cv2_resize(gen_np, orig_np.shape[1], orig_np.shape[0])
+                gen_np = resize_image(gen_np, orig_np.shape[1], orig_np.shape[0])
                 gen_pil = Image.fromarray(gen_np)
 
             # Compute all scores
@@ -339,7 +360,7 @@ class QualityValidator:
             }
 
 
-def cv2_resize(img: np.ndarray, width: int, height: int) -> np.ndarray:
+def resize_image(img: np.ndarray, width: int, height: int) -> np.ndarray:
     """Resize using PIL (no opencv dependency)."""
     pil = Image.fromarray(img)
     return np.array(pil.resize((width, height), Image.LANCZOS))

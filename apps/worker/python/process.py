@@ -76,24 +76,21 @@ def process_image_enhanced(
         alpha = alpha.filter(ImageFilter.SMOOTH_MORE)
         img.putalpha(alpha)
 
-    # Identity lock: force original product structure
+    # Resize
+    img = img.resize(target_size, Image.Resampling.LANCZOS)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    img.save(output_path, "PNG")
+
+    # Identity lock: force original product structure onto processed result
     if identity_lock and ref_image_path and os.path.isfile(ref_image_path):
         mask = create_segmentation_mask(ref_image_path)
         locked_path = output_path + ".locked.png"
-        identity_lock_composite(ref_image_path, input_path, mask, locked_path, blur_radius=2)
+        identity_lock_composite(ref_image_path, output_path, mask, locked_path, blur_radius=2)
         if os.path.exists(locked_path):
-            locked_img = Image.open(locked_path).convert("RGBA")
-            locked_img = locked_img.resize(target_size, Image.Resampling.LANCZOS)
-            locked_img.save(output_path, "PNG")
-            os.remove(locked_path)
+            os.replace(locked_path, output_path)
             logger.info("Saved identity-locked processed image: %s", output_path)
             return
 
-    # Resize
-    img = img.resize(target_size, Image.Resampling.LANCZOS)
-
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    img.save(output_path, "PNG")
     logger.info("Saved processed image: %s", output_path)
 
 

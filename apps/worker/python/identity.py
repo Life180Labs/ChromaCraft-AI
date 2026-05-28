@@ -54,7 +54,7 @@ def extract_edges(image_path: str, low_thresh: int = 50, high_thresh: int = 150)
     else:
         from PIL import ImageFilter
         edges_np = np.array(img.filter(ImageFilter.FIND_EDGES))
-        _, edges = cv2_threshold(edges_np, 30, 255)
+        _, edges = simple_threshold(edges_np, 30, 255)
     return edges
 
 
@@ -72,7 +72,7 @@ def extract_soft_edges(image_path: str) -> np.ndarray:
         from PIL import ImageFilter
         blurred = img.filter(ImageFilter.SMOOTH).filter(ImageFilter.SMOOTH)
         edges_np = np.array(blurred.filter(ImageFilter.FIND_EDGES))
-        _, dilated = cv2_threshold(edges_np, 25, 255)
+        _, dilated = simple_threshold(edges_np, 25, 255)
     return dilated
 
 
@@ -86,7 +86,7 @@ def estimate_depth(image_path: str) -> np.ndarray:
     return depth
 
 
-def cv2_threshold(img: np.ndarray, thresh: int, maxval: int) -> tuple:
+def simple_threshold(img: np.ndarray, thresh: int, maxval: int) -> tuple:
     """Simple threshold fallback when opencv unavailable."""
     result = np.where(img > thresh, maxval, 0).astype(np.uint8)
     return (result, result)

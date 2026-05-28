@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
+import { generateEvents, processingEvents } from '../../../../lib/bullmq';
+import { createAdapter } from '@bull-monitor/root';
 
 /**
  * GET /api/v1/events?jobId=123
- * SSE endpoint for real-time job progress.
+ * SSE endpoint for real-time job progress via BullMQ QueueEvents.
  */
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req);
@@ -18,7 +20,6 @@ export async function GET(req: NextRequest) {
     return new NextResponse('jobId required', { status: 400 });
   }
 
-  // Verify ownership
   const job = await prisma.job.findFirst({
     where: { id: jobId, userId: Number(userId) },
   });
@@ -28,63 +29,38 @@ export async function GET(req: NextRequest) {
 
   const stream = new ReadableStream({
     start(controller) {
-      // Send initial state
       controller.enqueue(`data: ${JSON.stringify({
-        event: 'connected',
-        jobId,
-        status: job.status,
-        progress: job.progress,
+        event: 'connected', jobId, status: job.status, progress: job.progress,
       })}\n\n`);
 
-      // Poll DB for updates (every 1.5s as fallback, SSE keeps connection open)
-      let lastProgress = job.progress;
-      let lastStatus = job.status;
-
-      const interval = setInterval(async () => {
-        try {
-          const current = await prisma.job.findUnique({
-            where: { id: jobId },
-            select: { status: true, progress: true, errorMessage: true },
-          });
-
-          if (!current) {
-            controller.enqueue(`data: ${JSON.stringify({ event: 'error', message: 'Job not found' })}\n\n`);
-            clearInterval(interval);
-            controller.close();
-            return;
-          }
-
-          const changed = current.progress !== lastProgress || current.status !== lastStatus;
-          if (changed) {
-            lastProgress = current.progress;
-            lastStatus = current.status;
-
-            controller.enqueue(`data: ${JSON.stringify({
-              event: 'progress',
-              jobId,
-              status: current.status,
-              progress: current.progress,
-              errorMessage: current.errorMessage,
-            })}\n\n`);
-
-            if (['COMPLETED', 'FAILED', 'QA_PENDING'].includes(current.status)) {
-              clearInterval(interval);
-              controller.enqueue(`data: ${JSON.stringify({
-                event: 'done',
-                jobId,
-                status: current.status,
-              })}\n\n`);
-              controller.close();
-            }
-          }
-        } catch {
-          clearInterval(interval);
+      const onProgress = ({ jobId: jid, data }: { jobId: string; data: any }) => {
+        if (Number(jid) === jobId) {
+          controller.enqueue(`data: ${JSON.stringify({ event: 'progress', jobId, ...data })}\n\n`);
+        }
+      };
+      const onCompleted = ({ jobId: jid }: { jobId: string }) => {
+        if (Number(jid) === jobId) {
+          controller.enqueue(`data: ${JSON.stringify({ event: 'done', jobId, status: 'COMPLETED' })}\n\n`);
           controller.close();
         }
-      }, 1500);
+      };
+      const onFailed = ({ jobId: jid, failedReason }: { jobId: string; failedReason: string }) => {
+        if (Number(jid) === jobId) {
+          controller.enqueue(`data: ${JSON.stringify({ event: 'failed', jobId, error: failedReason })}\n\n`);
+          controller.close();
+        }
+      };
+
+      generateEvents.on('progress', onProgress);
+      generateEvents.on('completed', onCompleted);
+      generateEvents.on('failed', onFailed);
+      processingEvents.on('completed', onCompleted);
 
       req.signal.addEventListener('abort', () => {
-        clearInterval(interval);
+        generateEvents.off('progress', onProgress);
+        generateEvents.off('completed', onCompleted);
+        generateEvents.off('failed', onFailed);
+        processingEvents.off('completed', onCompleted);
         controller.close();
       });
     },

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from typing import Optional
@@ -23,21 +24,12 @@ def compose_showcase_video(
     view_duration: float = 2.0,
     resolution: str = "1920x1080",
     include_turntable: bool = True,
-    include_labels: bool = True,
 ) -> str:
     """
-    Compose cinematic product showcase using FFmpeg.
-
-    Features:
-    - Multi-view transitions (front → right → back → left → top)
-    - Ken Burns zoom effect on each view
-    - Turntable rotation segment
-    - Color labels overlay
-    - Professional grade color grading
+    Compose product showcase using FFmpeg concat with crossfade.
     """
     view_order = ["front", "front_right", "right", "back_right", "back", "back_left", "left", "front_left"]
 
-    # Find available views
     available = []
     for view in view_order:
         candidates = [
@@ -60,131 +52,76 @@ def compose_showcase_video(
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    # Build FFmpeg filter graph
-    filter_parts = []
-    stream_index = 0
-    concat_inputs = []
-    total_duration = 0
+    temp_dir = os.path.join(frames_dir, ".video_temp")
+    os.makedirs(temp_dir, exist_ok=True)
 
-    # Segment 1: View showcase with transitions
-    for i, frame_path in enumerate(available):
-        # Ken Burns zoom: start at 1.0, end at 1.05 over view_duration
-        zoom = f"zoompan=z='min(zoom+0.002,1.05)':d={int(fps * view_duration)}:s={resolution}"
-        trim = f"trim=duration={view_duration}"
-        filter_parts.append(f"[{i}:v]{zoom},{trim}[v{i}]")
+    # Build per-view segments with Ken Burns zoom via FFmpeg
+    seg_files = []
+    for i, fp in enumerate(available):
+        seg = os.path.join(temp_dir, f"seg_{i:04d}.mp4")
+        seg_files.append(seg)
+        subprocess.run([
+            "ffmpeg", "-y", "-loop", "1", "-i", fp,
+            "-vf", f"zoompan=z='min(zoom+0.002,1.05)':d={int(fps * view_duration)}:s={resolution},format=yuv420p",
+            "-c:v", "libx264", "-t", str(view_duration), "-preset", "fast", "-crf", "20",
+            seg,
+        ], capture_output=True, check=True, timeout=60)
 
-        if i > 0:
-            offset = total_duration - transition_duration / 2
-            filter_parts.append(
-                f"[v{i-1}][v{i}]xfade=transition=fade:duration={transition_duration}:offset={offset}[vf{i}]"
-            )
-
-        total_duration += view_duration
-        stream_index = i
-
-    # If we have multiple views, the last combined stream is vf{stream_index}
-    # Otherwise it's v0
-    main_stream = f"vf{stream_index}" if stream_index > 0 else "v0"
-
-    # Segment 2: Turntable animation (if frames available and enabled)
-    if include_turntable and len(turntable_frames) > 1:
-        # Create a concat of turntable frames at 2x display rate
-        tt_duration = min(len(turntable_frames) / (fps * 2), 5.0)  # Max 5 seconds
-        tt_offset = total_duration - transition_duration / 2
-
-        # Use individual turntable frame inputs
-        tt_start_idx = len(available)
-        for j, tf in enumerate(turntable_frames):
-            idx = tt_start_idx + j
-
-        # Simpler approach: create turntable via image sequence
-        tt_dir = os.path.join(frames_dir, "tt_concat")
-        os.makedirs(tt_dir, exist_ok=True)
-        for j, tf in enumerate(turntable_frames):
-            from shutil import copy2
-            copy2(tf, os.path.join(tt_dir, f"frame_{j:04d}.png"))
-
-        # Use image sequence input for turntable
-        turntable_input = os.path.join(tt_dir, "frame_%04d.png")
-        # We'll handle this separately below
-
-    # Build the complete FFmpeg command
-    cmd = ["ffmpeg", "-y"]
-
-    # Add input images
-    for frame_path in available:
-        cmd.extend(["-loop", "1", "-i", frame_path])
-
-    # Add turntable as separate input if available
-    if include_turntable and len(turntable_frames) > 1:
-        concat_dir = os.path.join(frames_dir, "tt_concat")
-        os.makedirs(concat_dir, exist_ok=True)
-        from shutil import copy2
-        for j, tf in enumerate(turntable_frames):
-            copy2(tf, os.path.join(concat_dir, f"frame_{j:04d}.png"))
-        cmd.extend(["-framerate", str(fps * 2), "-i", os.path.join(concat_dir, "frame_%04d.png")])
-
-    # Build filter complex
-    filter_chains = []
-    for i in range(len(available)):
-        zoom = f"zoompan=z='min(zoom+0.002,1.05)':d={int(fps * view_duration)}:s={resolution},setpts=PTS-STARTPTS"
-        filter_chains.append(f"[{i}:v]{zoom}[z{i}]")
-
-    if len(available) > 1:
-        xfade_chain = f"[z0]"
-        for i in range(1, len(available)):
-            offset = (i - 1) * view_duration + (view_duration - transition_duration / 2)
-            prev = f"z{i}" if i == len(available) - 1 else f"xf{i}"
-            xfade_chain += f"[z{i}]xfade=transition=fade:duration={transition_duration}:offset={offset}[xf{i}]"
-            if i == len(available) - 1:
-                final_label = f"xf{i}"
-
-        if len(available) == 2:
-            filter_chains.append(f"[z0][z1]xfade=transition=fade:duration={transition_duration}:offset={view_duration - transition_duration/2}[showcase]")
-        else:
-            # Simplified single crossfade
-            filter_chains.append(f"[z0][z1]xfade=transition=fade:duration={transition_duration}:offset={view_duration - transition_duration/2}[showcase]")
+    # Build concat + xfade filter across all segments
+    n_segs = len(seg_files)
+    if n_segs == 1:
+        final_seg = seg_files[0]
     else:
-        filter_chains.append(f"[0:v]setpts=PTS-STARTPTS[showcase]")
+        filter_parts = []
+        for i in range(n_segs):
+            filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[s{i}]")
+        for i in range(n_segs - 1):
+            offset = (i + 1) * view_duration - transition_duration
+            if i == 0:
+                filter_parts.append(f"[s0][s1]xfade=transition=fade:duration={transition_duration}:offset={offset}[t1]")
+            elif i == n_segs - 2:
+                filter_parts.append(f"[t{i}][s{i+1}]xfade=transition=fade:duration={transition_duration}:offset={offset}[showcase]")
+            else:
+                filter_parts.append(f"[t{i}][s{i+1}]xfade=transition=fade:duration={transition_duration}:offset={offset}[t{i+1}]")
 
-    # Add turntable after showcase
+        xfade_out = os.path.join(temp_dir, "showcase.mp4")
+        subprocess.run([
+            "ffmpeg", "-y"] + sum([["-i", s] for s in seg_files], []) + [
+            "-filter_complex", "; ".join(filter_parts),
+            "-map", "[showcase]", "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            xfade_out,
+        ], capture_output=True, check=True, timeout=120)
+        final_seg = xfade_out
+
+    # Add turntable segment if available
     if include_turntable and len(turntable_frames) > 1:
-        tt_input_idx = len(available)
-        tt_dur = min(len(turntable_frames) / (fps * 2), 5.0)
-        showcase_dur = len(available) * view_duration
-        xfade_offset = showcase_dur - transition_duration / 2
-        filter_chains.append(
-            f"[{tt_input_idx}:v]setpts=PTS-STARTPTS[tt]"
-        )
-        filter_chains.append(
-            f"[showcase][tt]xfade=transition=fade:duration={transition_duration}:offset={xfade_offset}[final]"
-        )
-        final_stream = "[final]"
-    else:
-        final_stream = "[showcase]"
+        tt_seg = os.path.join(temp_dir, "turntable.mp4")
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-framerate", str(min(fps * 2, 24)),
+            "-pattern_type", "glob", "-i", os.path.join(frames_dir, f"{prefix}_360_*.png"),
+            "-vf", f"scale={resolution}:flags=lanczos,format=yuv420p",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            tt_seg,
+        ], capture_output=True, check=True, timeout=60)
 
-    # Apply color grade and scale
-    filter_chains.append(
-        f"{final_stream}eq=contrast=1.05:saturation=1.1:brightness=0.02,"
-        f"scale={resolution}:flags=lanczos,format=yuv420p[video]"
-    )
+        # Concatenate showcase + turntable with crossfade
+        final_out = os.path.join(temp_dir, "final.mp4")
+        subprocess.run([
+            "ffmpeg", "-y", "-i", final_seg, "-i", tt_seg,
+            "-filter_complex",
+            f"[0:v]setpts=PTS-STARTPTS[show];[1:v]setpts=PTS-STARTPTS[tt];"
+            f"[show][tt]xfade=transition=fade:duration={transition_duration}:offset={view_duration * n_segs - transition_duration}[out]",
+            "-map", "[out]", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+            final_out,
+        ], capture_output=True, check=True, timeout=120)
+        final_seg = final_out
 
-    filter_complex = "; ".join(filter_chains)
-    cmd.extend(["-filter_complex", filter_complex, "-map", "[video]"])
-    cmd.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"])
-    cmd.append(output_path)
+    # Copy final output
+    shutil.copy2(final_seg, output_path)
 
-    print(f"[INFO] Running FFmpeg video composition...", file=sys.stderr)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg failed (exit {result.returncode}): {result.stderr[:500]}")
-
-    # Cleanup temp concat dir
-    concat_dir = os.path.join(frames_dir, "tt_concat")
-    if os.path.isdir(concat_dir):
-        import shutil
-        shutil.rmtree(concat_dir, ignore_errors=True)
+    # Cleanup temp dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
     return output_path
 

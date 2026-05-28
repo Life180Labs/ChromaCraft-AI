@@ -42,7 +42,9 @@ export const UploadRequestSchema = z.object({
   file: z.instanceof(File).refine((f) => {
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
     return validTypes.includes(f.type);
-  }, 'File must be PNG, JPEG, or WebP image'),
+  }, 'File must be PNG, JPEG, or WebP image').refine((f) => {
+    return f.size <= 50_000_000;
+  }, 'File must be under 50MB'),
   name: z.string().max(200).optional(),
   jobId: z.string().optional(),
   color: z.string().max(50).optional(),
