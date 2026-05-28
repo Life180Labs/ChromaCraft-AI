@@ -59,6 +59,7 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs = [], selectedJob, onSe
                       src={`/api/v1/assets?id=${asset.id}`}
                       alt={assetLabel(asset.path)}
                       style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   </div>
                   <span className="vc-label" style={{ display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{assetLabel(asset.path)}</span>

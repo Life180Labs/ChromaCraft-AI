@@ -62,6 +62,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 
   // Hybrid generation state
   const [isGenerating, setIsGenerating] = useState(false);
+  const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
 
   const [lifestyleSimStatus, setLifestyleSimStatus] = useState<'waiting' | 'generating' | 'done'>('waiting');
   const [lifestyleCards, setLifestyleCards] = useState([
@@ -347,13 +348,14 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                         <TbAlertCircle size={22} style={{ color: 'var(--err)', display: 'block', margin: '0 auto 4px' }} />
                       ) : (() => {
                         const variantAsset = getVariantAsset(colName);
-                        const showRealImage = isFinished && variantAsset && (variantAsset.status === 'done' || variantAsset.status === 'approved' || variantAsset.status === 'pending');
+                        const showRealImage = isFinished && variantAsset && !failedImages.has(variantAsset.id) && (variantAsset.status === 'done' || variantAsset.status === 'approved' || variantAsset.status === 'pending');
                         return showRealImage ? (
                           <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 4px', overflow: 'hidden' }}>
                             <img
                               src={`/api/v1/assets?id=${variantAsset.id}`}
                               alt={colName}
                               style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }}
+                              onError={() => setFailedImages(prev => new Set(prev).add(variantAsset!.id))}
                             />
                           </div>
                         ) : (

@@ -89,7 +89,9 @@ def generate_stability_identity(
         )
 
     if response.status_code != 200:
-        raise Exception(f"Stability API Error ({response.status_code}): {response.text[:300]}")
+        error_body = response.text[:1000]
+        print(f"[STABILITY_API_ERROR] Status {response.status_code}: {error_body}", file=sys.stderr)
+        raise Exception(f"Stability API Error ({response.status_code}): {error_body}")
 
     raw_img = Image.open(BytesIO(response.content)).convert("RGBA")
     raw_img = raw_img.resize(image_size, Image.Resampling.LANCZOS)
