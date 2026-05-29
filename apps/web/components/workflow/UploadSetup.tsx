@@ -47,6 +47,9 @@ type UploadSetupProps = {
   customColors: string[];
   onCustomColorsChange: (colors: string[]) => void;
 
+  additionalContext: string;
+  onAdditionalContextChange: (v: string) => void;
+
   promptText: string;
   onPromptChange: (v: string) => void;
 
@@ -111,6 +114,7 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
   spinEnabled, onSpinChange,
   cropsEnabled, onCropsChange,
   customColors, onCustomColorsChange,
+  additionalContext, onAdditionalContextChange,
   promptText, onPromptChange,
   selectedProviderId, onSelectProvider,
   providers
@@ -395,6 +399,21 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Additional Context */}
+          <div className="sq" style={{ margin: 0 }}>
+            <div className="sq-label" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)', marginBottom: '8px' }}>Additional Context (Optional)</div>
+            <textarea
+              placeholder="E.g., Add a neon glow, make it look highly cinematic, place it on a mountain road..."
+              value={additionalContext}
+              onChange={(e) => onAdditionalContextChange(e.target.value)}
+              style={{
+                width: '100%', minHeight: '60px', padding: '10px',
+                fontSize: '12px', background: 'var(--bg2)', border: '1px solid var(--bd)',
+                borderRadius: 'var(--r-md)', color: 'var(--tx)', outline: 'none', resize: 'vertical'
+              }}
+            />
           </div>
         </div>
       </div>

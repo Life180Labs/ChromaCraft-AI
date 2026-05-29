@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
       denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
       qualityThreshold: (settings as any)?.qualityThreshold ?? 0.92,
       identityLock: (settings as any)?.identityLock !== false,
+      additionalContext: (settings as any)?.additionalContext,
     };
 
     // Enqueue

@@ -29,6 +29,7 @@ export const GenerationSettingsSchema = z.object({
   denoiseStrength: z.number().min(0).max(1).default(0.4),
   qualityThreshold: z.number().min(0).max(1).default(0.92),
   identityLock: z.boolean().default(true),
+  additionalContext: z.string().max(2000).optional(),
 });
 
 export const GenerateRequestSchema = z.object({

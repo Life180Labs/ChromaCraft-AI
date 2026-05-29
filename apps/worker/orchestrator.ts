@@ -27,6 +27,7 @@ export interface GenerationSettings {
   denoiseStrength?: number;
   qualityThreshold?: number;
   identityLock?: boolean;
+  additionalContext?: string;
 }
 
 export interface GenerationParams {
@@ -275,10 +276,15 @@ export class AgentController {
     const identityInstruction =
       'CRITICAL: The product shape, geometry, proportions, camera angle, reflections, and ALL structural details MUST remain identical to the original.';
 
-    if (!critique) {
-      return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality.`;
+    let contextAddition = '';
+    if (params.settings?.additionalContext && params.settings.additionalContext.trim() !== '') {
+      contextAddition = ` Additional Custom Context: ${params.settings.additionalContext.trim()}.`;
     }
-    return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Adjustments: ${critique}. Photorealistic, studio lighting, catalog quality.`;
+
+    if (!critique) {
+      return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality.${contextAddition}`;
+    }
+    return `${colorResolved}. ${industry} primary color: ${color}. Goal: ${goal}. ${identityInstruction} Adjustments: ${critique}. Photorealistic, studio lighting, catalog quality.${contextAddition}`;
   }
 
   private async runIdentityPreservation(refImagePath: string, outDir: string): Promise<void> {
@@ -388,6 +394,45 @@ export async function generateCollaterals(
     logger.error({ jobId, err: err.message }, 'Grid generation failed');
   }
 
+  // 360 spin via Python multiview
+  if (params.settings?.spinEnabled !== false && params.refImagePath) {
+    try {
+      const multiviewScript = path.join(scriptDir, 'multiview.py');
+      const spinArgs = [
+        multiviewScript, '--task', 'generate', '--refImage', params.refImagePath,
+        '--outDir', params.outDir,
+        '--prefix', prefix, '--provider', 'stability', '--jsonMode',
+      ];
+
+      const result = await runProcess('python', spinArgs, {
+        env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
+      });
+      if (result.exitCode === 0) {
+        logger.info({ jobId }, '360 spin generated');
+        const lines = result.stdout.trim().split('\n');
+        let spinResult: any = null;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (lines[i].trim().startsWith('{')) {
+            try { spinResult = JSON.parse(lines[i]); break; } catch { }
+          }
+        }
+        if (spinResult && spinResult.paths) {
+          const angles = ["front", "front_right", "right", "back_right", "back", "back_left", "left", "front_left", "top"];
+          for (const angle of angles) {
+            const spinPath = spinResult.paths[angle];
+            if (spinPath) {
+              await prisma.asset.create({ data: { jobId, type: 'spin_frame', path: spinPath, status: 'done' } });
+            }
+          }
+        }
+      } else {
+        logger.warn({ jobId, stderr: result.stderr }, '360 spin generation returned non-zero exit code');
+      }
+    } catch (err: any) {
+      logger.warn({ jobId, err: err.message }, '360 spin generation failed');
+    }
+  }
+
   // Video generation via Python
   if (params.settings?.videoEnabled !== false) {
     try {
@@ -405,30 +450,11 @@ export async function generateCollaterals(
       if (result.exitCode === 0 && fs.existsSync(videoPath)) {
         await prisma.asset.create({ data: { jobId, type: 'video', path: videoPath, status: 'done' } });
         logger.info({ jobId }, 'Video generated');
+      } else {
+        logger.warn({ jobId, stderr: result.stderr }, 'Video generation returned non-zero exit code');
       }
     } catch (err: any) {
       logger.warn({ jobId, err: err.message }, 'Video generation failed');
-    }
-  }
-
-  // 360 spin via Python multiview
-  if (params.settings?.spinEnabled !== false && params.refImagePath) {
-    try {
-      const multiviewScript = path.join(scriptDir, 'multiview.py');
-      const spinArgs = [
-        multiviewScript, '--task', 'generate', '--refImage', params.refImagePath,
-        '--outDir', params.outDir,
-        '--prefix', prefix, '--provider', 'stability', '--jsonMode',
-      ];
-
-      const result = await runProcess('python', spinArgs, {
-        env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
-      });
-      if (result.exitCode === 0) {
-        logger.info({ jobId }, '360 spin generated');
-      }
-    } catch (err: any) {
-      logger.warn({ jobId, err: err.message }, '360 spin generation failed');
     }
   }
 }

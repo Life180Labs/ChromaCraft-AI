@@ -208,6 +208,7 @@ const processingWorker = new Worker('processing', async (job: BullJob<Processing
     const { exitCode, stderr } = await runPythonScript('process.py', [
       '--inputDir', jobAssetDir, '--outputDir', processedDir, '--prefix', prefix,
       ...(refAsset?.path ? ['--refImage', refAsset.path] : []),
+      '--noIdentityLock',
       '--jsonMode',
     ]);
     if (exitCode !== 0) throw new Error(`process.py failed (exit ${exitCode}): ${stderr}`);

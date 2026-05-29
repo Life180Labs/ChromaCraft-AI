@@ -8,6 +8,7 @@ import {
 
 import { Button } from '../ui/Button';
 import type { Job, TabId, Provider } from '../shared/types';
+import { InteractiveSpin } from './InteractiveSpin';
 
 type GeneratePanelProps = {
   jobs: Job[];
@@ -107,6 +108,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const finishedCount = variantAssets.filter(a => a.status === 'done' || a.status === 'approved').length;
   const failedVariantIndex = configuredColors.findIndex((c: string) => c.toLowerCase() === 'silver');
   const progressPercent = totalVariants > 0 ? Math.round((finishedCount / totalVariants) * 100) : 0;
+  
+  const videoAsset = assets.find(a => a.type === 'video');
+  const spinFrames = assets.filter(a => a.type === 'spin_frame').sort((a, b) => a.id - b.id);
 
   // ----------------------------------------------------
   // HYBRID GENERATION LOGIC (Puter.js + Backend)
@@ -450,6 +454,34 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 </div>
               )}
             </div>
+
+            {(videoAsset || spinFrames.length > 0) && (
+              <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', borderBottom: '1px solid var(--bd)', paddingBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--tx)' }}>Media Collaterals</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  {videoAsset && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>Showcase Video</span>
+                      <video 
+                        src={`/api/v1/assets?id=${videoAsset.id}`} 
+                        autoPlay loop muted playsInline
+                        style={{ width: '100%', borderRadius: '4px', border: '1px solid var(--bd)' }}
+                      />
+                    </div>
+                  )}
+                  {spinFrames.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>360 Interactive Spin</span>
+                      <div style={{ width: '100%', borderRadius: '4px', border: '1px solid var(--bd)', background: 'var(--bg2)', padding: '4px' }}>
+                        <InteractiveSpin frameIds={spinFrames.map(a => a.id)} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="card" style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', borderBottom: '1px solid var(--bd)', paddingBottom: '6px' }}>

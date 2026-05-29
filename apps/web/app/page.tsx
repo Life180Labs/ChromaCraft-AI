@@ -60,8 +60,9 @@ export default function Home() {
   const [lifestyleEnabled, setLifestyleEnabled] = useState<boolean>(false);
   const [videoEnabled, setVideoEnabled] = useState<boolean>(false);
   const [spinEnabled, setSpinEnabled] = useState<boolean>(false);
-  const [cropsEnabled, setCropsEnabled] = useState<boolean>(false);
+  const [cropsEnabled, setCropsEnabled] = useState<boolean>(true);
   const [customColors, setCustomColors] = useState<string[]>([...UC1_STANDARD_COLORS]);
+  const [additionalContext, setAdditionalContext] = useState<string>('');
 
   // Upload/File variables
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -226,6 +227,7 @@ export default function Home() {
         videoEnabled,
         spinEnabled,
         cropsEnabled,
+        additionalContext,
       };
 
       const selectedProvider = providers.find(p => p.id === selectedProviderId);
@@ -398,6 +400,8 @@ export default function Home() {
             onCropsChange={setCropsEnabled}
             customColors={customColors}
             onCustomColorsChange={setCustomColors}
+            additionalContext={additionalContext}
+            onAdditionalContextChange={setAdditionalContext}
             promptText={promptText}
             onPromptChange={setPromptText}
             selectedProviderId={selectedProviderId}

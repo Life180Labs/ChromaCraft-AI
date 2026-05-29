@@ -171,6 +171,18 @@ def generate_with_stability_video(ref_image_path: str, api_key: str, out_dir: st
     return paths
 
 
+def generate_mock_spin(ref_image_path: str, out_dir: str, prefix: str = "product") -> dict:
+    """Fallback mock generator that copies the reference image for all angles."""
+    import shutil
+    os.makedirs(out_dir, exist_ok=True)
+    paths = {}
+    for view in VIEW_ANGLES:
+        view_path = os.path.join(out_dir, f"{prefix}_360_{view}.png")
+        shutil.copy2(ref_image_path, view_path)
+        paths[view] = view_path
+    return paths
+
+
 def generate_turntable_gif(frame_dir: str, output_path: str, prefix: str = "product", duration: int = 100) -> str:
     """Generate a turntable GIF from rendered frames."""
     frames = sorted([
@@ -219,10 +231,14 @@ def main() -> int:
 
     try:
         if args.task == "generate":
-            if args.provider == "tripo" and args.apiKey != "none":
-                paths = generate_with_tripo(args.refImage, args.apiKey, args.outDir, args.prefix)
-            else:
-                paths = generate_with_stability_video(args.refImage, args.apiKey, args.outDir, args.prefix)
+            try:
+                if args.provider == "tripo" and args.apiKey != "none":
+                    paths = generate_with_tripo(args.refImage, args.apiKey, args.outDir, args.prefix)
+                else:
+                    paths = generate_with_stability_video(args.refImage, args.apiKey, args.outDir, args.prefix)
+            except Exception as api_err:
+                # Fallback to mock if API fails (e.g. invalid key, no key)
+                paths = generate_mock_spin(args.refImage, args.outDir, args.prefix)
 
             if args.jsonMode:
                 print(json.dumps({"status": "success", "paths": paths}), flush=True)

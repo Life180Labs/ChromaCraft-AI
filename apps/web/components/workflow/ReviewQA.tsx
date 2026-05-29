@@ -4,6 +4,7 @@ import React from 'react';
 import { TbCheck, TbX, TbArrowRight } from 'react-icons/tb';
 import { Button } from '../ui/Button';
 import type { Job, TabId } from '../shared/types';
+import { InteractiveSpin } from './InteractiveSpin';
 
 type ReviewQAProps = {
   jobs: Job[];
@@ -21,6 +22,8 @@ function assetLabel(path: string): string {
 export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs = [], selectedJob, onSelectJob, onQAReview, onNavigate }) => {
   const safeJobs = Array.isArray(jobs) ? jobs : [];
   const qaAssets = selectedJob?.assets?.filter(a => a.type === 'processed') || [];
+  const videoAsset = selectedJob?.assets?.find(a => a.type === 'video');
+  const spinFrames = selectedJob?.assets?.filter(a => a.type === 'spin_frame').sort((a, b) => a.id - b.id) || [];
   const allApproved = qaAssets.length > 0 && qaAssets.every(a => a.status === 'approved');
 
   return (
@@ -75,6 +78,54 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs = [], selectedJob, onSe
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {selectedJob && (videoAsset || spinFrames.length > 0) && (
+          <div style={{ marginTop: '24px' }}>
+            <h4 style={{ fontSize: '13px', marginBottom: '12px', color: 'var(--tx)' }}>Media Collaterals</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              {videoAsset && (
+                <div className={`variant-cell ${videoAsset.status === 'approved' ? 'done' : videoAsset.status === 'rejected' ? 'error' : 'pending'}`}>
+                  <div className="vc-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                    <video 
+                      src={`/api/v1/assets?id=${videoAsset.id}`} 
+                      autoPlay loop muted playsInline
+                      style={{ width: '100%', borderRadius: '4px', border: '1px solid var(--bd)' }}
+                    />
+                    <span className="vc-label">Showcase Video</span>
+                    <span className="vc-status">{videoAsset.status}</span>
+                    <div className="btn-row" style={{ marginTop: 8 }}>
+                      <Button variant="ghost" onClick={() => onQAReview(videoAsset.id, 'approved')}>
+                        <TbCheck style={{ color: 'var(--suc)' }} /> Approve
+                      </Button>
+                      <Button variant="ghost" onClick={() => onQAReview(videoAsset.id, 'rejected')}>
+                        <TbX style={{ color: 'var(--err)' }} /> Reject
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {spinFrames.length > 0 && (
+                <div className={`variant-cell ${spinFrames[0].status === 'approved' ? 'done' : spinFrames[0].status === 'rejected' ? 'error' : 'pending'}`}>
+                  <div className="vc-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                    <div style={{ width: '100%', borderRadius: '4px', border: '1px solid var(--bd)', background: 'var(--bg2)', padding: '4px' }}>
+                      <InteractiveSpin frameIds={spinFrames.map(a => a.id)} />
+                    </div>
+                    <span className="vc-label">360 Interactive Spin</span>
+                    <span className="vc-status">{spinFrames[0].status}</span>
+                    <div className="btn-row" style={{ marginTop: 8 }}>
+                      <Button variant="ghost" onClick={() => spinFrames.forEach(f => onQAReview(f.id, 'approved'))}>
+                        <TbCheck style={{ color: 'var(--suc)' }} /> Approve
+                      </Button>
+                      <Button variant="ghost" onClick={() => spinFrames.forEach(f => onQAReview(f.id, 'rejected'))}>
+                        <TbX style={{ color: 'var(--err)' }} /> Reject
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
