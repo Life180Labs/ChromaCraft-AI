@@ -114,41 +114,85 @@ def save_control_inputs(image_path: str, out_dir: str, prefix: str = "") -> dict
     return paths
 
 
+def _rgb_to_lab(rgb: np.ndarray) -> np.ndarray:
+    """Convert RGB (float 0-1) to LAB using PIL (no cv2 dependency)."""
+    h, w = rgb.shape[:2]
+    rgb_8u = np.clip(rgb * 255, 0, 255).astype(np.uint8)
+    lab_pil = Image.fromarray(rgb_8u, "RGB").convert("LAB")
+    lab = np.array(lab_pil, dtype=np.float32)
+    return lab  # L 0-255, a 0-255, b 0-255
+
+
+def _lab_to_rgb(lab: np.ndarray) -> np.ndarray:
+    """Convert LAB back to RGB (float 0-1)."""
+    lab_8u = np.clip(lab, 0, 255).astype(np.uint8)
+    rgb_pil = Image.fromarray(lab_8u, "LAB").convert("RGB")
+    rgb = np.array(rgb_pil, dtype=np.float32) / 255.0
+    return rgb
+
+
 def identity_lock_composite(
     original_path: str,
     generated_path: str,
     mask: np.ndarray,
     output_path: str,
     blur_radius: int = 5,
+    structure_preservation: float = 0.98,
 ) -> str:
     """
-    Lock original product identity within mask region.
-    Uses feathering at mask boundaries for natural blending.
+    Lock original product IDENTITY (shape/geometry) while allowing color change.
+    
+    Uses LAB color space blending:
+    - L channel from original  → preserves luminance, edges, shading, reflections
+    - AB channels from generated → applies the new color
+    
+    Edge-aware feathering at mask boundaries for seamless blend.
     """
-    orig = Image.open(original_path).convert("RGBA")
+    orig = Image.open(original_path).convert("RGB")
     gen = Image.open(generated_path).convert("RGBA")
+    gen_rgb = Image.new("RGB", gen.size, (255, 255, 255))
+    gen_rgb.paste(gen, mask=gen.split()[3])
 
     orig_resized = orig.resize(gen.size, Image.LANCZOS)
     mask_resized = Image.fromarray(mask).resize(gen.size, Image.LANCZOS)
-
     mask_np = np.array(mask_resized).astype(np.float32) / 255.0
 
-    # Feather mask edges using PIL
+    # Feather mask edges
     if blur_radius > 0 and CV2_AVAILABLE:
         mask_np = cv2.GaussianBlur(mask_np, (blur_radius * 2 + 1, blur_radius * 2 + 1), 0)
     elif blur_radius > 0:
         mask_pil = mask_resized.filter(ImageFilter.GaussianBlur(radius=blur_radius))
         mask_np = np.array(mask_pil).astype(np.float32) / 255.0
 
-    orig_np = np.array(orig_resized).astype(np.float32)
-    gen_np = np.array(gen).astype(np.float32)
+    orig_np = np.array(orig_resized, dtype=np.float32) / 255.0
+    gen_np = np.array(gen_rgb, dtype=np.float32) / 255.0
 
-    mask_4ch = np.stack([mask_np] * 4, axis=2)
-    composite = gen_np * (1.0 - mask_4ch) + orig_np * mask_4ch
-    composite = np.clip(composite, 0, 255).astype(np.uint8)
+    # Convert to LAB
+    orig_lab = _rgb_to_lab(orig_np)
+    gen_lab = _rgb_to_lab(gen_np)
 
-    result_img = Image.fromarray(composite)
-    result_img.save(output_path, "PNG")
+    # Blend L channel: use original luminance (preserves structure) weighted by mask
+    L_o = orig_lab[:, :, 0]
+    L_g = gen_lab[:, :, 0]
+    # Within mask: blend between original L (structure) and generated L
+    # Outside mask: use generated L (background unchanged)
+    L_blended = L_g * (1.0 - mask_np) + (L_o * structure_preservation + L_g * (1.0 - structure_preservation)) * mask_np
+
+    # AB channels from generated (contains the new color)
+    A_g = gen_lab[:, :, 1]
+    B_g = gen_lab[:, :, 2]
+
+    result_lab = np.stack([L_blended, A_g, B_g], axis=2)
+    result_rgb = _lab_to_rgb(result_lab)
+
+    # Restore alpha from generated
+    gen_alpha = np.array(gen.split()[3], dtype=np.float32) / 255.0
+    result_rgba = np.ones((gen.size[1], gen.size[0], 4), dtype=np.float32)
+    result_rgba[:, :, :3] = result_rgb
+    result_rgba[:, :, 3] = gen_alpha
+
+    result_rgba = np.clip(result_rgba * 255, 0, 255).astype(np.uint8)
+    Image.fromarray(result_rgba).save(output_path, "PNG")
     return output_path
 
 

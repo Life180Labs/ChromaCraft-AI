@@ -45,13 +45,14 @@ def process_image_enhanced(
     smooth_mask: bool = True,
     ref_image_path: Optional[str] = None,
     identity_lock: bool = True,
+    preserve_resolution: bool = True,
 ) -> None:
     """
     Enhanced image processing with:
     - Background removal (U2-Net)
     - Alpha matte refinement
-    - Identity lock (optional)
-    - High-quality LANCZOS resize
+    - Identity lock (LAB-space, preserves generated color)
+    - Optional resize (disabled by default — preserves original AI resolution)
     """
     with open(input_path, "rb") as f:
         input_data = f.read()
@@ -76,22 +77,24 @@ def process_image_enhanced(
         alpha = alpha.filter(ImageFilter.SMOOTH_MORE)
         img.putalpha(alpha)
 
-    # Resize
-    img = img.resize(target_size, Image.Resampling.LANCZOS)
+    # Only resize if requested and different from input size
+    if not preserve_resolution and target_size and target_size != img.size:
+        img = img.resize(target_size, Image.Resampling.LANCZOS)
+
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     img.save(output_path, "PNG")
 
-    # Identity lock: force original product structure onto processed result
+    # Identity lock: force original product structure (luminance) but preserve generated color
     if identity_lock and ref_image_path and os.path.isfile(ref_image_path):
         mask = create_segmentation_mask(ref_image_path)
         locked_path = output_path + ".locked.png"
         identity_lock_composite(ref_image_path, output_path, mask, locked_path, blur_radius=2)
         if os.path.exists(locked_path):
             os.replace(locked_path, output_path)
-            logger.info("Saved identity-locked processed image: %s", output_path)
+            logger.info("Saved identity-locked processed image: %s (%dx%d)", output_path, img.width, img.height)
             return
 
-    logger.info("Saved processed image: %s", output_path)
+    logger.info("Saved processed image: %s (%dx%d)", output_path, img.width, img.height)
 
 
 def extract_mask(input_path: str, output_path: str) -> None:
@@ -168,6 +171,7 @@ def main() -> int:
                 input_path=input_path,
                 output_path=output_path,
                 target_size=size,
+                preserve_resolution=True,
                 remove_bg_flag=not args.noBackgroundRemoval,
                 ref_image_path=args.refImage or None,
                 identity_lock=not args.noIdentityLock,

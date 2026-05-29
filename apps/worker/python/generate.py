@@ -44,7 +44,7 @@ def raw_filename(color: str) -> str:
     return f"raw_{color_to_slug(color)}.png"
 
 # ---------------------------------------------------------------------------
-# Strategy 1: Stability Search & Replace with Identity Lock (Preferred)
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 def _resolve_api_key(cli_key: str) -> str:
@@ -55,15 +55,30 @@ def _resolve_api_key(cli_key: str) -> str:
     return env_key if env_key else "none"
 
 
+def _identity_prompt(color: str, prompt: str) -> str:
+    """Build a minimal identity-preserving prompt — tells AI to only change color, nothing else."""
+    return (
+        f"Change the color to {color}. "
+        f"Keep the EXACT SAME product: identical shape, geometry, proportions, "
+        f"camera angle, reflections, highlights, shadows, badges, logos, and ALL details. "
+        f"Only the paint color changes to {color}. Nothing else changes."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Strategy 1: Stability ControlNet Structure (Primary — best identity preservation)
+# ---------------------------------------------------------------------------
+
 def generate_stability_identity(
     prompt: str, color: str, api_key: str, out_dir: str,
     ref_image_path: Optional[str] = None,
-    image_size: tuple[int, int] = (800, 600),
+    image_size: tuple[int, int] = (0, 0),
     denoise_strength: float = 0.4,
     seed: int = 42,
 ) -> str:
     """
     Identity-preserving generation using Stability AI ControlNet Structure.
+    High control_strength (0.95) forces exact geometry preservation.
     """
     if not ref_image_path or not os.path.isfile(ref_image_path):
         raise ValueError(f"Reference image not found at '{ref_image_path}'. Generation aborted.")
@@ -72,7 +87,10 @@ def generate_stability_identity(
     if api_key == "none":
         raise ValueError("Stability API key required. Set CHROMACRAFT_API_KEY env var or pass --apiKey.")
 
-    print(f"[INFO] Identity-preserving generation (control/structure) for {color} (seed={seed})...", file=sys.stderr)
+    color_prompt = _identity_prompt(color, prompt)
+    control_strength = 1.0  # Maximum preservation — prevents hallucination
+
+    print(f"[INFO] ControlNet Structure generation for {color} (control_strength={control_strength:.2f}, seed={seed})...", file=sys.stderr)
 
     with open(ref_image_path, "rb") as f:
         response = requests.post(
@@ -80,8 +98,8 @@ def generate_stability_identity(
             headers={"Authorization": f"Bearer {api_key}", "Accept": "image/*"},
             files={"image": f},
             data={
-                "prompt": prompt,
-                "control_strength": "0.7",
+                "prompt": color_prompt,
+                "control_strength": str(control_strength),
                 "output_format": "png",
                 "seed": str(seed),
             },
@@ -94,17 +112,16 @@ def generate_stability_identity(
         raise Exception(f"Stability API Error ({response.status_code}): {error_body}")
 
     raw_img = Image.open(BytesIO(response.content)).convert("RGBA")
-    raw_img = raw_img.resize(image_size, Image.Resampling.LANCZOS)
     
     out_path = os.path.join(out_dir, raw_filename(color))
     raw_img.save(out_path, "PNG")
 
-    print(f"[OK] Generative color pass complete: {out_path}", file=sys.stderr)
+    print(f"[OK] Generative color pass complete: {out_path} ({raw_img.size[0]}x{raw_img.size[1]})", file=sys.stderr)
     return out_path
 
 
 # ---------------------------------------------------------------------------
-# Strategy 2: ControlNet (disabled — only Stability AI is supported)
+# Strategy 2: ControlNet / SDXL (always delegates to Stability primary)
 # ---------------------------------------------------------------------------
 
 def generate_sdxl_controlnet(
@@ -112,8 +129,8 @@ def generate_sdxl_controlnet(
     ref_image_path: Optional[str] = None,
     image_size: tuple[int, int] = (800, 600),
 ) -> str:
-    """Fallback: always delegates to Stability identity generation."""
-    print(f"[INFO] Using Stability identity generation for {color} (ControlNet disabled).", file=sys.stderr)
+    """Fallback: delegates to ControlNet Structure."""
+    print(f"[INFO] Using ControlNet Structure for {color}.", file=sys.stderr)
     return generate_stability_identity(prompt, color, api_key, out_dir, ref_image_path, image_size)
 
 
@@ -124,11 +141,11 @@ def generate_sdxl_controlnet(
 def generate_hsl_shift(
     color: str, out_dir: str,
     ref_image_path: Optional[str] = None,
-    image_size: tuple[int, int] = (800, 600),
+    image_size: tuple[int, int] = (0, 0),
 ) -> str:
     """
     Zero-cost recoloring by shifting HSL hue channel.
-    Preserves ALL texture, lighting, and detail.
+    Preserves ALL texture, lighting, and detail at original resolution.
     Only changes the product color.
     """
     if not ref_image_path or not os.path.isfile(ref_image_path):
@@ -138,13 +155,7 @@ def generate_hsl_shift(
 
     target_hue = hue_for_color(color)
     out_path = os.path.join(out_dir, raw_filename(color))
-
     mask_by_color_hsl_shift(ref_image_path, target_hue, out_path)
-
-    # Resize
-    img = Image.open(out_path).convert("RGBA")
-    img = img.resize(image_size, Image.Resampling.LANCZOS)
-    img.save(out_path, "PNG")
 
     return out_path
 
@@ -157,6 +168,7 @@ GENERATION_STRATEGIES = {
     "stability": generate_stability_identity,
     "sdxl_controlnet": generate_sdxl_controlnet,
     "hsl_shift": generate_hsl_shift,
+    "controlnet": generate_stability_identity,
 }
 
 

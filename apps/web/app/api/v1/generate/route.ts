@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
         generationConfig: {
           upsert: {
             create: {
-              strategy: (settings as any)?.strategy || 'STABILITY_SEARCH_REPLACE',
+              strategy: 'STABILITY_SEARCH_REPLACE',
               denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
               controlNetEnabled: (settings as any)?.identityLock !== false,
               identityLock: (settings as any)?.identityLock !== false,
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
               qualityThreshold: (settings as any)?.qualityThreshold ?? 0.92,
             },
             update: {
-              strategy: (settings as any)?.strategy || 'STABILITY_SEARCH_REPLACE',
+              strategy: 'STABILITY_SEARCH_REPLACE',
               denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
             },
           },
