@@ -40,6 +40,12 @@ export async function GET(req: NextRequest) {
       contentType = 'image/gif';
     } else if (fileExt === '.webp') {
       contentType = 'image/webp';
+    } else if (fileExt === '.mp4') {
+      contentType = 'video/mp4';
+    } else if (fileExt === '.webm') {
+      contentType = 'video/webm';
+    } else if (fileExt === '.mov') {
+      contentType = 'video/quicktime';
     }
 
     return new NextResponse(fileBuffer, {

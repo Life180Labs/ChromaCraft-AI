@@ -9,9 +9,10 @@ type DashboardHomeProps = {
   jobs: Job[];
   onNavigate: (tab: TabId) => void;
   onSelectJob: (job: Job) => void;
+  onNewJob?: () => void;
 };
 
-export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs = [], onNavigate, onSelectJob }) => {
+export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs = [], onNavigate, onSelectJob, onNewJob }) => {
   const safeJobs = Array.isArray(jobs) ? jobs : [];
   const completedCount = safeJobs.filter(j => j.status === 'COMPLETED').length;
   const totalAssets = safeJobs.reduce((acc, j) => acc + (j.assets?.length || 0), 0);
@@ -35,7 +36,7 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs = [
             Life180 Labs · Free plan · <a style={{ color: 'var(--acc)', cursor: 'pointer' }}>Upgrade</a>
           </div>
         </div>
-        <button className="btn primary" onClick={() => onNavigate('setup')}>
+        <button className="btn primary" onClick={() => onNewJob ? onNewJob() : onNavigate('setup')}>
           <TbPlus /> New job
         </button>
       </div>
@@ -86,7 +87,7 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ userName, jobs = [
       {/* Quick start cards — restored from prototype */}
       <div className="sec">Quick start</div>
       <div className="g2">
-        <div className="card" style={{ cursor: 'pointer' }} onClick={() => onNavigate('setup')}>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => onNewJob ? onNewJob() : onNavigate('setup')}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{ width: 36, height: 36, background: 'var(--acc-bg)', borderRadius: 'var(--r)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <TbSparkles style={{ color: 'var(--acc-tx)', fontSize: 18 }} />

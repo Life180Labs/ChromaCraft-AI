@@ -59,6 +59,7 @@ export default function Home() {
   const [gridRows, setGridRows] = useState<number>(3);
   const [lifestyleEnabled, setLifestyleEnabled] = useState<boolean>(false);
   const [videoEnabled, setVideoEnabled] = useState<boolean>(false);
+  const [videoPrompt, setVideoPrompt] = useState<string>('Cinematic showcase of the product under dynamic studio lighting');
   const [spinEnabled, setSpinEnabled] = useState<boolean>(false);
   const [cropsEnabled, setCropsEnabled] = useState<boolean>(true);
   const [customColors, setCustomColors] = useState<string[]>([...UC1_STANDARD_COLORS]);
@@ -231,7 +232,7 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
       const uploadData = await uploadRes.json();
       const job = uploadData.job;
 
-      // 2. Trigger Generation API immediately with unified settings
+      // 2. Save settings (no pipeline — user will trigger generation from Generate tab)
       const settings = {
         prefix: filenamePrefix || (modelName || uploadFile.name).trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_-]/g, ''),
         colors: customColors.slice(0, gridCols * gridRows),
@@ -243,67 +244,60 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
         targetPurpose,
         lifestyleEnabled,
         videoEnabled,
+        videoPrompt,
         spinEnabled,
         cropsEnabled,
         additionalContext,
       };
 
-      const selectedProvider = providers.find(p => p.id === selectedProviderId);
-      const hasApiKey = selectedProvider && !selectedProvider.name.toLowerCase().includes('mock') && !!selectedProvider.hasApiKey;
-
-      let success = false;
-      let errMsg = '';
-
-      if (hasApiKey) {
-        const generateRes = await fetch('/api/v1/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jobId: job.id,
-            prompt: promptText,
-            providerId: selectedProviderId,
-            settings,
-          }),
-        });
-        success = generateRes.ok;
-        if (!success) {
-          const errData = await generateRes.json().catch(() => ({}));
-          errMsg = errData.error || 'Generation trigger failed';
-        }
-      } else {
-        // Free/Puter flow - save prompt/settings but keep status PENDING
-        const saveRes = await fetch('/api/v1/jobs', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: job.id,
-            prompt: promptText,
-            settings,
-          }),
-        });
-        success = saveRes.ok;
-        if (!success) errMsg = 'Failed to save workflow settings';
-      }
+      await fetch('/api/v1/jobs', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: job.id, prompt: promptText, settings }),
+      });
 
       setLoading(false);
-      if (success) {
-        // Fetch jobs to get latest processing state
-        const updatedJobsRes = await fetch('/api/v1/jobs');
-        if (updatedJobsRes.ok) {
-          const updatedJobs = await updatedJobsRes.json();
-          setJobs(updatedJobs);
-          const currentJob = updatedJobs.find((j: Job) => j.id === job.id);
-          if (currentJob) setSelectedJob(currentJob);
-        }
-        // Redirect to generate progress tab
-        setActiveTab('generate');
-      } else {
-        setUploadError(errMsg);
+
+      // Fetch jobs to get latest state
+      const updatedJobsRes = await fetch('/api/v1/jobs');
+      if (updatedJobsRes.ok) {
+        const updatedJobs = await updatedJobsRes.json();
+        setJobs(updatedJobs);
+        const currentJob = updatedJobs.find((j: Job) => j.id === job.id);
+        if (currentJob) setSelectedJob(currentJob);
       }
+
+      // Navigate to generate tab so user can review prompt and trigger
+      setActiveTab('generate');
     } catch (err: any) {
       setLoading(false);
       setUploadError(err.message || 'Workflow initialization failed');
     }
+  };
+
+
+  // Reset all state for a fresh job
+  const handleStartNewJob = () => {
+    setSelectedJob(null);
+    setUploadFile(null);
+    setUploadError('');
+    setExportUrl(null);
+    setModelName('');
+    setFilenamePrefix('');
+    setIndustry('Automotive');
+    setTargetAudience('General consumers');
+    setTargetMarket('India');
+    setTargetPurpose('Product catalog');
+    setGridCols(4);
+    setGridRows(3);
+    setLifestyleEnabled(false);
+    setVideoEnabled(false);
+    setVideoPrompt('Cinematic showcase of the product under dynamic studio lighting');
+    setSpinEnabled(false);
+    setCropsEnabled(true);
+    setCustomColors([...UC1_STANDARD_COLORS]);
+    setAdditionalContext('');
+    setActiveTab('setup');
   };
 
   const handleStartGeneration = async () => {
@@ -324,7 +318,8 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
           const currentJob = updatedJobs.find((j: Job) => j.id === selectedJob.id);
           if (currentJob) setSelectedJob(currentJob);
         }
-        setActiveTab('history');
+        // Navigate to review instead of history
+        setActiveTab('review');
       }
     } catch {
       setLoading(false);
@@ -383,7 +378,7 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
   const renderTab = () => {
     switch (activeTab) {
       case 'home':
-        return <DashboardHome userName={userName} jobs={jobs} onNavigate={setActiveTab} onSelectJob={setSelectedJob} />;
+        return <DashboardHome userName={userName} jobs={jobs} onNavigate={setActiveTab} onSelectJob={setSelectedJob} onNewJob={handleStartNewJob} />;
       case 'setup':
         return (
           <UploadSetup
@@ -412,6 +407,8 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
             onLifestyleChange={setLifestyleEnabled}
             videoEnabled={videoEnabled}
             onVideoChange={setVideoEnabled}
+            videoPrompt={videoPrompt}
+            onVideoPromptChange={setVideoPrompt}
             spinEnabled={spinEnabled}
             onSpinChange={setSpinEnabled}
             cropsEnabled={cropsEnabled}
@@ -471,7 +468,14 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
     <>
       <TopBar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={(tab) => {
+          // When clicking "New Job" tab (setup), always reset state
+          if (tab === 'setup') {
+            handleStartNewJob();
+          } else {
+            setActiveTab(tab);
+          }
+        }}
         nightMode={nightMode}
         onToggleNight={() => setNightMode(!nightMode)}
         onProfileClick={() => setActiveTab('profile')}

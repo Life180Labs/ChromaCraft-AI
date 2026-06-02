@@ -1,10 +1,31 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { TbKey, TbLogout, TbCheck, TbEye, TbEyeOff } from 'react-icons/tb';
+import { TbKey, TbLogout, TbCheck, TbEye, TbEyeOff, TbBrandGoogle, TbVideo } from 'react-icons/tb';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import type { Provider } from '../shared/types';
+
+// ─── Model Options ────────────────────────────────────────────────────────────
+const GEMINI_IMAGE_MODELS = [
+  { value: 'gemini-3.1-flash-image', label: 'Gemini 3.1 Flash Image' },
+  { value: 'gemini-3.1-flash', label: 'Gemini 3.1 Flash' },
+  { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
+  { value: 'gemini-2.0-flash-preview-image-generation', label: 'Gemini 2.0 Flash (Image Gen)' },
+  { value: 'gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash Preview' },
+  { value: 'imagen-3.0-generate-002', label: 'Imagen 3.0 Generate' },
+  { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+  { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+];
+
+const GEMINI_VIDEO_MODELS = [
+  { value: 'veo-3.1-generate-001', label: 'Veo 3.1' },
+  { value: 'veo-3.1-generate-preview', label: 'Veo 3.1 Preview' },
+  { value: 'veo-3.0-generate-001', label: 'Veo 3.0' },
+  { value: 'veo-3.0-generate-preview', label: 'Veo 3.0 Preview' },
+  { value: 'veo-2.0-generate-001', label: 'Veo 2.0' },
+  { value: 'veo-2.0-generate-preview', label: 'Veo 2.0 Preview' },
+];
 
 type ProviderKeyConfig = {
   name: string;
@@ -92,6 +113,12 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [toggling2FA, setToggling2FA] = useState(false);
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
 
+  // Model settings
+  const [geminiImageModel, setGeminiImageModel] = useState('gemini-2.0-flash-preview-image-generation');
+  const [geminiVideoModel, setGeminiVideoModel] = useState('veo-2.0-generate-001');
+  const [savingModels, setSavingModels] = useState(false);
+  const [modelSaveMessage, setModelSaveMessage] = useState<string | null>(null);
+
   useEffect(() => {
     setEditedName(userName);
   }, [userName]);
@@ -111,7 +138,45 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
       }
     };
     fetchProfile();
+
+    // Fetch model settings
+    const fetchModelSettings = async () => {
+      try {
+        const res = await fetch('/api/v1/settings');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.geminiImageModel) setGeminiImageModel(data.geminiImageModel);
+          if (data.geminiVideoModel) setGeminiVideoModel(data.geminiVideoModel);
+        }
+      } catch (err) {
+        console.error('Failed to load model settings:', err);
+      }
+    };
+    fetchModelSettings();
   }, []);
+
+  const handleSaveModels = async () => {
+    setSavingModels(true);
+    setModelSaveMessage(null);
+    try {
+      const res = await fetch('/api/v1/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geminiImageModel, geminiVideoModel }),
+      });
+      if (res.ok) {
+        setModelSaveMessage('Model preferences saved successfully.');
+      } else {
+        const err = await res.json();
+        setModelSaveMessage(err.error || 'Failed to save model settings.');
+      }
+    } catch {
+      setModelSaveMessage('Failed to save model settings.');
+    } finally {
+      setSavingModels(false);
+    }
+  };
+
 
   const handleSaveProfile = async () => {
     setProfileError(null);
@@ -502,6 +567,79 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             {saveMessage}
           </div>
         )}
+      </div>
+
+      <div className="divider" />
+
+      {/* ─── Generation Model Settings ─────────────────────────────── */}
+      <div className="sec" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <TbBrandGoogle size={16} /> Generation Model Settings
+      </div>
+      <div className="card">
+        <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 16 }}>
+          Choose which Gemini models to use for image generation and video creation.
+          These models will be used whenever you trigger generation from the workflow.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+          {/* Image Model */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TbBrandGoogle size={14} /> Image Generation Model
+            </label>
+            <select
+              id="gemini-image-model-select"
+              value={geminiImageModel}
+              onChange={(e) => setGeminiImageModel(e.target.value)}
+              style={{
+                background: 'var(--bg2)', border: '1px solid var(--bd)',
+                borderRadius: 6, padding: '8px 12px', fontSize: 12,
+                color: 'var(--tx)', outline: 'none', cursor: 'pointer',
+              }}
+            >
+              {GEMINI_IMAGE_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 10, color: 'var(--tx4)', fontFamily: 'monospace' }}>{geminiImageModel}</div>
+          </div>
+
+          {/* Video Model */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TbVideo size={14} /> Video Generation Model
+            </label>
+            <select
+              id="gemini-video-model-select"
+              value={geminiVideoModel}
+              onChange={(e) => setGeminiVideoModel(e.target.value)}
+              style={{
+                background: 'var(--bg2)', border: '1px solid var(--bd)',
+                borderRadius: 6, padding: '8px 12px', fontSize: 12,
+                color: 'var(--tx)', outline: 'none', cursor: 'pointer',
+              }}
+            >
+              {GEMINI_VIDEO_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 10, color: 'var(--tx4)', fontFamily: 'monospace' }}>{geminiVideoModel}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Button variant="primary" onClick={handleSaveModels} disabled={savingModels}>
+            {savingModels ? 'Saving...' : 'Save Model Preferences'}
+          </Button>
+          {modelSaveMessage && (
+            <span style={{
+              fontSize: 12,
+              color: modelSaveMessage.includes('success') ? 'var(--suc)' : 'var(--err)',
+            }}>
+              {modelSaveMessage}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="divider" />

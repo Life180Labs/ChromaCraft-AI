@@ -39,6 +39,8 @@ type UploadSetupProps = {
   onLifestyleChange: (v: boolean) => void;
   videoEnabled: boolean;
   onVideoChange: (v: boolean) => void;
+  videoPrompt: string;
+  onVideoPromptChange: (v: string) => void;
   spinEnabled: boolean;
   onSpinChange: (v: boolean) => void;
   cropsEnabled: boolean;
@@ -111,6 +113,7 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
   gridRows, onGridRowsChange,
   lifestyleEnabled, onLifestyleChange,
   videoEnabled, onVideoChange,
+  videoPrompt, onVideoPromptChange,
   spinEnabled, onSpinChange,
   cropsEnabled, onCropsChange,
   customColors, onCustomColorsChange,
@@ -543,25 +546,43 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
           </div>
 
           {/* Promo video clip */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <input type="checkbox" checked={videoEnabled} onChange={(e) => onVideoChange(e.target.checked)} style={{ accentColor: 'var(--acc)' }} />
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Promo video clip</span>
-                  <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--bg3)', color: 'var(--tx3)', padding: '1px 4px', borderRadius: '3px' }}>Optional</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: 'var(--bg2)', borderRadius: 'var(--r-md)', border: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input type="checkbox" checked={videoEnabled} onChange={(e) => onVideoChange(e.target.checked)} style={{ accentColor: 'var(--acc)' }} />
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--tx)' }}>Promo video clip</span>
+                    <span style={{ fontSize: '9px', fontWeight: 600, background: 'var(--bg3)', color: 'var(--tx3)', padding: '1px 4px', borderRadius: '3px' }}>Optional</span>
+                  </div>
+                  <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>8-15 sec AI clip via Gemini Video (Veo)</small>
                 </div>
-                <small style={{ fontSize: '11px', color: 'var(--tx3)' }}>8-15 sec AI clip via Runway / Kling</small>
+              </div>
+              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-${videoCost.toFixed(2)}</span>
+                <button 
+                  type="button" 
+                  className={`toggle ${videoEnabled ? 'on' : 'off'}`} 
+                  onClick={() => onVideoChange(!videoEnabled)} 
+                />
               </div>
             </div>
-            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>-${videoCost.toFixed(2)}</span>
-              <button 
-                type="button" 
-                className={`toggle ${videoEnabled ? 'on' : 'off'}`} 
-                onClick={() => onVideoChange(!videoEnabled)} 
-              />
-            </div>
+            {videoEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid var(--bd)', paddingTop: '8px', marginTop: '4px' }}>
+                <label htmlFor="video-prompt-textarea" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--tx)' }}>Video Generation Prompt</label>
+                <textarea
+                  id="video-prompt-textarea"
+                  placeholder="E.g., Cinematic camera pan, showing the vehicle driving through a scenic wet road..."
+                  value={videoPrompt}
+                  onChange={(e) => onVideoPromptChange(e.target.value)}
+                  style={{
+                    width: '100%', minHeight: '60px', padding: '8px',
+                    fontSize: '11px', background: 'var(--bg)', border: '1px solid var(--bd)',
+                    borderRadius: 'var(--r-md)', color: 'var(--tx)', outline: 'none', resize: 'vertical'
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* 360 spin set */}

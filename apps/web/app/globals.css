@@ -232,6 +232,7 @@ body {
 .variant-cell:hover { border-color: var(--acc); box-shadow: 0 0 0 2px var(--acc-bg); }
 .variant-cell.done { border-color: var(--suc); background: linear-gradient(to bottom, var(--bg2), var(--bg)); }
 .vc-body { padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 120px; justify-content: center; }
+.vc-swatch { height: 4px; border-radius: 2px 2px 0 0; margin: -1px -1px 0; }
 .vc-label { font-size: 10px; color: var(--tx2); font-weight: 500; }
 .vc-status { font-size: 9px; color: var(--tx3); }
 

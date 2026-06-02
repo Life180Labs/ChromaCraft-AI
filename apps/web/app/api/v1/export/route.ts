@@ -68,9 +68,12 @@ export async function GET(req: NextRequest) {
     });
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
 
-    const approvedAssets = job.assets.filter(a => a.type === 'processed' && a.status === 'approved');
+    const approvedAssets = job.assets.filter(
+      a => ['processed', 'variant', 'grid', 'video', 'crop', 'lifestyle'].includes(a.type) &&
+           ['approved', 'done', 'pending'].includes(a.status)
+    );
     if (approvedAssets.length === 0) {
-      return NextResponse.json({ error: 'No approved assets to export' }, { status: 400 });
+      return NextResponse.json({ error: 'No assets to export. Generate some images first.' }, { status: 400 });
     }
 
     if (!token && mode === 'url') {
@@ -91,55 +94,92 @@ export async function GET(req: NextRequest) {
     const storageDir = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage');
     const jobDir = path.join(storageDir, 'assets', String(jobId));
 
-    // Add background-removed images
+    // 1. Add background-removed images to "BG Removed" folder
     const processedDir = path.join(jobDir, 'processed');
+    const processedFileSet = new Set<string>();
     if (existsSync(processedDir)) {
-      const files = readdirSync(processedDir).filter(f => f.endsWith('.png'));
+      const files = readdirSync(processedDir).filter(
+        f => f.endsWith('.png') && !f.includes('_instagram') && !f.includes('_banner') && !f.includes('_story')
+      );
       for (const file of files) {
-        archive.file(path.join(processedDir, file), { name: `background-removed/${file}` });
+        processedFileSet.add(file);
+        archive.file(path.join(processedDir, file), { name: `BG Removed/${file}` });
       }
     }
 
-    // Add individual variant images
-    const variantAssets = job.assets.filter(a => a.type === 'variant' && a.status === 'done');
+    // 2. Add raw variant images — if no processed version exists, put in BG Removed as fallback
+    const variantAssets = job.assets.filter(
+      a => a.type === 'variant' && ['done', 'approved', 'pending'].includes(a.status)
+    );
     for (const asset of variantAssets) {
       if (existsSync(asset.path)) {
-        archive.file(asset.path, { name: `individual-images/${path.basename(asset.path)}` });
+        const base = path.basename(asset.path);
+        // Only add as fallback if the bg-removed version does NOT exist
+        if (!processedFileSet.has(base)) {
+          archive.file(asset.path, { name: `BG Removed/${base}` });
+        }
       }
     }
 
-    // Add grid images
-    const gridAssets = job.assets.filter(a => a.type === 'grid' && a.status === 'done');
+    // 3. Add grid images to "Grid Image" folder
+    const gridAssets = job.assets.filter(
+      a => a.type === 'grid' && ['done', 'approved', 'pending'].includes(a.status)
+    );
     for (const asset of gridAssets) {
       if (existsSync(asset.path)) {
-        archive.file(asset.path, { name: `merged-grid/${path.basename(asset.path)}` });
+        archive.file(asset.path, { name: `Grid Image/${path.basename(asset.path)}` });
       }
     }
 
-    // Add 360 spin assets
-    const spinDir = jobDir;
-    if (existsSync(spinDir)) {
-      const spinFiles = readdirSync(spinDir).filter(
-        f => (f.includes('360') || f.includes('spin')) && f.endsWith('.png')
+    // 4. Add lifestyle scenes to "Lifestyle Scene" folder
+    const lifestyleAssets = job.assets.filter(
+      a => (a.type === 'lifestyle' || a.path.includes('lifestyle')) &&
+           ['done', 'approved', 'pending'].includes(a.status)
+    );
+    for (const asset of lifestyleAssets) {
+      if (existsSync(asset.path)) {
+        archive.file(asset.path, { name: `Lifestyle Scene/${path.basename(asset.path)}` });
+      }
+    }
+
+    // 5. Add 360 spin assets to "360 spin" folder
+    if (existsSync(jobDir)) {
+      const spinFiles = readdirSync(jobDir).filter(
+        f => (f.includes('360') || f.includes('spin')) && (f.endsWith('.png') || f.endsWith('.gif'))
       );
       for (const file of spinFiles) {
-        archive.file(path.join(spinDir, file), { name: `360-spin/${file}` });
+        archive.file(path.join(jobDir, file), { name: `360 spin/${file}` });
       }
     }
 
-    // Add videos
-    const videoAssets = job.assets.filter(a => a.type === 'video' && a.status === 'done');
+    // 6. Add videos to "Promo Video" folder
+    const videoAssets = job.assets.filter(
+      a => a.type === 'video' && ['done', 'approved', 'pending'].includes(a.status)
+    );
     for (const asset of videoAssets) {
       if (existsSync(asset.path)) {
-        archive.file(asset.path, { name: `videos/${path.basename(asset.path)}` });
+        archive.file(asset.path, { name: `Promo Video/${path.basename(asset.path)}` });
       }
     }
 
-    // Add turntable GIF
-    if (existsSync(jobDir)) {
-      const gifFiles = readdirSync(jobDir).filter(f => f.endsWith('.gif'));
-      for (const file of gifFiles) {
-        archive.file(path.join(jobDir, file), { name: `360-spin/${file}` });
+    // 7. Add social media crops to "social media crops" folder
+    if (existsSync(processedDir)) {
+      const cropFiles = readdirSync(processedDir).filter(
+        f => f.endsWith('.png') && (f.includes('_instagram') || f.includes('_banner') || f.includes('_story'))
+      );
+      for (const file of cropFiles) {
+        archive.file(path.join(processedDir, file), { name: `social media crops/${file}` });
+      }
+    }
+
+    // Also check crop-type assets from DB
+    const cropAssets = job.assets.filter(
+      a => a.type === 'crop' && ['done', 'approved', 'pending'].includes(a.status)
+    );
+    for (const asset of cropAssets) {
+      if (existsSync(asset.path)) {
+        const base = path.basename(asset.path);
+        archive.file(asset.path, { name: `social media crops/${base}` });
       }
     }
 
