@@ -61,6 +61,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const [fixOption, setFixOption] = useState('Contrast Boost');
   const [reprocessing, setReprocessing] = useState(false);
 
+  // Creative Variation State
+  const [artStyle, setArtStyle] = useState('Photorealistic');
+  const [environment, setEnvironment] = useState('Modern Studio backdrop');
+  const [lighting, setLighting] = useState('Soft Studio Lighting');
+
   // Hybrid generation state
   const [isGenerating, setIsGenerating] = useState(false);
   const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
@@ -108,7 +113,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const finishedCount = variantAssets.filter(a => a.status === 'done' || a.status === 'approved').length;
   const failedVariantIndex = configuredColors.findIndex((c: string) => c.toLowerCase() === 'silver');
   const progressPercent = totalVariants > 0 ? Math.round((finishedCount / totalVariants) * 100) : 0;
-  
+
   const videoAsset = assets.find(a => a.type === 'video');
   const spinFrames = assets.filter(a => a.type === 'spin_frame').sort((a, b) => a.id - b.id);
 
@@ -119,13 +124,16 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
     if (!selectedJob) return;
     setIsGenerating(true);
 
-    // Check if user has selected a valid provider API key (Paid) vs no provider (Free/Puter)
     const selectedProvider = providers?.find((p) => p.id === selectedProviderId);
     const hasApiKey = selectedProvider && !selectedProvider.name.toLowerCase().includes('mock');
 
     try {
       if (hasApiKey) {
         console.log("API Key Provider selected. Using standard backend generation...");
+
+        // Compile dynamic creative settings into context
+        const customContext = `Render in a ${artStyle} style. The setting is a ${environment}. Use ${lighting}.`;
+
         const response = await fetch('/api/v1/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -133,7 +141,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             jobId: selectedJob.id,
             prompt: promptText,
             providerId: selectedProviderId,
-            settings: { ...metadata, colors: configuredColors }
+            settings: {
+              ...metadata,
+              colors: configuredColors,
+              additionalContext: customContext // Pass context to the backend
+            }
           })
         });
         if (!response.ok) throw new Error("Backend generation failed");
@@ -261,6 +273,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
       {selectedJob ? (
         <div className="g3" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
             <div className="sq" style={{ padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <div>
@@ -325,6 +338,91 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 </div>
               )}
             </div>
+
+            {/* CREATIVE VARIATIONS SETTINGS PANEL */}
+            {selectedJob.status === 'PENDING' && (
+              <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600 }}>Creative Variations</span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+
+                  {/* Art Style Dropdown */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--tx3)' }}>Art Style</label>
+                    <select
+                      value={artStyle}
+                      onChange={(e) => setArtStyle(e.target.value)}
+                      style={{ background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', color: 'var(--tx)', outline: 'none' }}
+                    >
+                      <option value="Photorealistic">Photorealistic</option>
+                      <option value="Cinematic">Cinematic</option>
+                      <option value="Cyberpunk 2077 aesthetic">Cyberpunk</option>
+                      <option value="Cel-shaded Cartoon">Cel-shaded Cartoon</option>
+                    </select>
+                  </div>
+
+                  {/* Environment Dropdown */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--tx3)' }}>Environment</label>
+                    <select
+                      value={environment}
+                      onChange={(e) => setEnvironment(e.target.value)}
+                      style={{ background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', color: 'var(--tx)', outline: 'none' }}
+                    >
+                      <option value="Modern Studio backdrop">Studio Backdrop</option>
+                      <option value="Bustling Tokyo Cityscape">Tokyo Cityscape</option>
+                      <option value="Serene Mountain Highway">Mountain Highway</option>
+                      <option value="Professional Racing Track">Racing Track</option>
+                    </select>
+                  </div>
+
+                  {/* Lighting Dropdown */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--tx3)' }}>Lighting Setup</label>
+                    <select
+                      value={lighting}
+                      onChange={(e) => setLighting(e.target.value)}
+                      style={{ background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', color: 'var(--tx)', outline: 'none' }}
+                    >
+                      <option value="Soft Studio Lighting">Soft Studio Lighting</option>
+                      <option value="Golden Hour Sunset">Golden Hour</option>
+                      <option value="Moody Neon Glow">Neon Glow</option>
+                      <option value="Harsh Midday Sun">Midday Sun</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Compiled Prompt Preview */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px', borderTop: '1px solid var(--bd)', paddingTop: '12px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--tx3)', fontWeight: 600 }}>Backend Prompt Preview (Sample: {configuredColors[0] || 'White'})</label>
+                  <div
+                    style={{
+                      background: 'var(--bg2)',
+                      border: '1px solid var(--bd)',
+                      borderRadius: '4px',
+                      padding: '8px 10px',
+                      fontSize: '11px',
+                      color: 'var(--tx2)',
+                      lineHeight: '1.4',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                      fontFamily: 'monospace'
+                    }}
+                  >
+                    {(() => {
+                      if (!selectedJob) return '';
+                      const baseColor = configuredColors[0] || 'White';
+                      const colorResolved = promptText.replace(/\[color\]/gi, baseColor);
+                      const ind = metadata.industry && metadata.industry !== 'General' ? metadata.industry : 'Product';
+                      const prefixVal = metadata.prefix || String(selectedJob.id);
+                      const goal = `Generate an identity-preserved product catalog image with correct color. Maintain exact same shape, geometry, proportions, and structure. Only color changes. Job: "${selectedJob.name}" | Prefix: ${prefixVal} | Industry: ${ind}.`;
+                      const identityInstruction = 'CRITICAL: The product shape, geometry, proportions, camera angle, reflections, and ALL structural details MUST remain identical to the original.';
+                      const customContext = `Render in a ${artStyle} style. The setting is a ${environment}. Use ${lighting}.`;
+                      return `${colorResolved}. ${ind} primary color: ${baseColor}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality. Additional Custom Context: ${customContext}.`;
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div
               id="variant-grid"
@@ -464,8 +562,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                   {videoAsset && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
                       <span style={{ fontSize: '11px', color: 'var(--tx3)' }}>Showcase Video</span>
-                      <video 
-                        src={`/api/v1/assets?id=${videoAsset.id}`} 
+                      <video
+                        src={`/api/v1/assets?id=${videoAsset.id}`}
                         autoPlay loop muted playsInline
                         style={{ width: '100%', borderRadius: '4px', border: '1px solid var(--bd)' }}
                       />
