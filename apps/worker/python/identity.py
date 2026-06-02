@@ -52,7 +52,6 @@ def extract_edges(image_path: str, low_thresh: int = 50, high_thresh: int = 150)
             img_cv = img_np
         edges = cv2.Canny(img_cv, low_thresh, high_thresh)
     else:
-        from PIL import ImageFilter
         edges_np = np.array(img.filter(ImageFilter.FIND_EDGES))
         _, edges = simple_threshold(edges_np, 30, 255)
     return edges
@@ -69,7 +68,6 @@ def extract_soft_edges(image_path: str) -> np.ndarray:
         edges = cv2.Canny(blurred, 30, 100)
         dilated = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
     else:
-        from PIL import ImageFilter
         blurred = img.filter(ImageFilter.SMOOTH).filter(ImageFilter.SMOOTH)
         edges_np = np.array(blurred.filter(ImageFilter.FIND_EDGES))
         _, dilated = simple_threshold(edges_np, 25, 255)
@@ -80,7 +78,6 @@ def estimate_depth(image_path: str) -> np.ndarray:
     """Depth estimation using Laplacian variance (no MiDaS dependency)."""
     img = Image.open(image_path).convert("L")
     img_np = np.array(img, dtype=np.float64)
-    from PIL import ImageFilter
     lap = np.array(img.filter(ImageFilter.Kernel((3, 3), [0, -1, 0, -1, 4, -1, 0, -1, 0], scale=1)))
     depth = np.clip(np.abs(lap), 0, 255).astype(np.uint8)
     return depth
@@ -150,7 +147,7 @@ def identity_lock_composite(
     """
     orig = Image.open(original_path).convert("RGB")
     gen = Image.open(generated_path).convert("RGBA")
-    gen_rgb = Image.new("RGB", gen.size, (255, 255, 255))
+    gen_rgb = Image.new("RGB", gen.size, (128, 128, 128))
     gen_rgb.paste(gen, mask=gen.split()[3])
 
     orig_resized = orig.resize(gen.size, Image.LANCZOS)

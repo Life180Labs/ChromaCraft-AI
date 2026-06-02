@@ -24,10 +24,7 @@ from PIL import Image
 from identity import (
     create_segmentation_mask,
     identity_lock_composite,
-    identity_lock_recolor,
     mask_by_color_hsl_shift,
-    hue_for_color,
-    save_control_inputs,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,13 +53,8 @@ def _resolve_api_key(cli_key: str) -> str:
 
 
 def _identity_prompt(color: str, prompt: str) -> str:
-    """Build a minimal identity-preserving prompt — tells AI to only change color, nothing else."""
-    return (
-        f"Change the color to {color}. "
-        f"Keep the EXACT SAME product: identical shape, geometry, proportions, "
-        f"camera angle, reflections, highlights, shadows, badges, logos, and ALL details. "
-        f"Only the paint color changes to {color}. Nothing else changes."
-    )
+    """Append color change instruction — orchestrator injects identity details separately."""
+    return f"Change the color to {color}."
 
 
 # ---------------------------------------------------------------------------

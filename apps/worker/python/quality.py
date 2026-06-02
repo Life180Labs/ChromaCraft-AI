@@ -31,7 +31,6 @@ try:
 except ImportError:
     pass
 
-CLIP_AVAILABLE = False
 _loaded_clip_model = None
 _loaded_clip_preprocess = None
 
@@ -327,7 +326,7 @@ class QualityValidator:
             weights = {"clip": 0.35, "dinov2": 0.35, "ssim": 0.15, "psnr": 0.05, "histogram": 0.10}
             aggregate = (
                 weights["clip"] * clip_val +
-                weights["dinov2"] * max(dino_val, clip_val * 0.8) +
+                weights["dinov2"] * dino_val +
                 weights["ssim"] * ssim_val +
                 weights["psnr"] * min(psnr_val / 50.0, 1.0) +
                 weights["histogram"] * hist_val

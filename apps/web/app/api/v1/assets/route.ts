@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import path from 'path';
 
 export async function GET(req: NextRequest) {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'File not found on disk' }, { status: 404 });
     }
 
-    const fileBuffer = readFileSync(asset.path);
+    const fileBuffer = await readFile(asset.path);
     const fileExt = path.extname(asset.path).toLowerCase();
     let contentType = 'image/png';
     if (fileExt === '.jpg' || fileExt === '.jpeg') {

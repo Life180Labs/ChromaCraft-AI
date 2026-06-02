@@ -111,7 +111,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const assets = selectedJob?.assets || [];
   const variantAssets = assets.filter(a => a.type === 'variant' || a.type === 'processed');
   const finishedCount = variantAssets.filter(a => a.status === 'done' || a.status === 'approved').length;
-  const failedVariantIndex = configuredColors.findIndex((c: string) => c.toLowerCase() === 'silver');
   const progressPercent = totalVariants > 0 ? Math.round((finishedCount / totalVariants) * 100) : 0;
 
   const videoAsset = assets.find(a => a.type === 'video');
@@ -597,23 +596,18 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 [06:21:40] init: Starting engine pipeline context<br />
                 [06:21:42] queue: Enqueued {totalVariants} variant jobs<br />
                 [06:21:43] worker: Executing generate.py --jobId {selectedJob.id}<br />
-                {configuredColors.map((c, i) => {
-                  const done = finishedCount > i || selectedJob.status !== 'PROCESSING';
-                  const failed = failedVariantIndex === i && selectedJob.status !== 'PROCESSING';
-                  return (
-                    <div key={c}>
-                      {done ? (
-                        failed ? (
-                          <span style={{ color: 'var(--err)' }}>[06:21:4{5 + i}] variant: {c} finish failed (Color mismatch)</span>
-                        ) : (
+                  {configuredColors.map((c, i) => {
+                    const done = finishedCount > i || selectedJob.status !== 'PROCESSING';
+                    return (
+                      <div key={c}>
+                        {done ? (
                           <span style={{ color: 'var(--suc)' }}>[06:21:4{5 + i}] variant: {c} color rendered</span>
-                        )
-                      ) : (
-                        <span>[06:21:4{5 + i}] variant: {c} in queue</span>
-                      )}
-                    </div>
-                  );
-                })}
+                        ) : (
+                          <span>[06:21:4{5 + i}] variant: {c} in queue</span>
+                        )}
+                      </div>
+                    );
+                  })}
                 {selectedJob.status !== 'PROCESSING' && (
                   <div>
                     [06:21:55] process: Executing background removal process.py<br />
