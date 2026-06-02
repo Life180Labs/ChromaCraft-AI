@@ -49,7 +49,7 @@ async function callGeminiImageAPI(
       if (!res.ok) {
         const errText = await res.text();
         const errLower = errText.toLowerCase();
-        
+
         // Check for rate limit or quota errors
         if (res.status === 429 || errLower.includes('quota') || errLower.includes('rate limit')) {
           if (attempt < maxRetries - 1) {
@@ -73,7 +73,7 @@ async function callGeminiImageAPI(
           }
         }
       }
-      
+
       console.warn(`   ⚠️ [API] Warning: API returned empty image data.`);
       return null;
 
@@ -189,8 +189,13 @@ async function generateVideoWithVeo(
         throw new Error(`Veo operation failed: ${pollData.error.message || JSON.stringify(pollData.error)}`);
       }
 
-      // Extract video download URI from response
-      const generatedVideos = pollData.response?.generatedVideos || pollData.response?.videos || [];
+      // Extract video download URI from response using the correct Veo schema path
+      const generatedVideos =
+        pollData.response?.generateVideoResponse?.generatedSamples ||
+        pollData.response?.generatedVideos ||
+        pollData.response?.videos ||
+        [];
+
       for (const videoObj of generatedVideos) {
         const videoUri = videoObj?.video?.uri || videoObj?.uri;
         if (videoUri) {
@@ -251,7 +256,7 @@ async function generateVideoWithGemini(
 ): Promise<Buffer | null> {
   // Convert buffer to base64 for direct inline usage in Veo API
   const imageBase64 = referenceImageBuffer.toString('base64');
-  
+
   // Step 1: Generate video via Veo + poll
   const videoUri = await generateVideoWithVeo(apiKey, videoPrompt, imageBase64, referenceImageMime, videoModel);
   if (!videoUri) return null;
@@ -518,7 +523,7 @@ export async function POST(req: NextRequest) {
             const color = colors[i];
             // Fallback to the original image if this specific thread failed
             const imgPath = generatedImages.get(color) || originalAsset.path;
-            
+
             const col = i % gridCols;
             const row = Math.floor(i / gridCols);
             const left = col * imgWidth;
@@ -545,8 +550,8 @@ export async function POST(req: NextRequest) {
               background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
           })
-          .composite(compositeLayers)
-          .toFile(gridPath);
+            .composite(compositeLayers)
+            .toFile(gridPath);
 
           await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'grid' } });
           await prisma.asset.create({
@@ -693,7 +698,7 @@ export async function POST(req: NextRequest) {
         if (!require('fs').existsSync(processedDir)) {
           require('fs').mkdirSync(processedDir, { recursive: true });
         }
-        
+
         // Dynamically load background removal module
         let removeBackground: any = null;
         try {
@@ -707,33 +712,33 @@ export async function POST(req: NextRequest) {
           for (const result of successResults) {
             const inputPath = result.filePath!;
             const colorSlug = result.color.replace(/\\s+/g, '_');
-            
+
             // ── A. Background Removal ──
             const processedPath = path.join(processedDir, `raw_${colorSlug}.png`);
             let useImgPath = inputPath; // default to original if bg removal fails
-            
+
             if (removeBackground) {
-               console.log(`[Background] Removing background for variant: ${colorSlug}...`);
-               try {
-                 // Format URL as file:// for local paths in node
-                 const bgBlob = await removeBackground(`file://${inputPath.replace(/\\\\/g, '/')}`);
-                 const bgBuffer = Buffer.from(await bgBlob.arrayBuffer());
-                 await writeFile(processedPath, bgBuffer);
-                 
-                 await prisma.asset.create({ 
-                   data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id } 
-                 });
-                 useImgPath = processedPath; // Use the transparent image for crops!
-               } catch (bgErr: any) {
-                 console.error(`[Background] Failed to remove background for ${colorSlug}:`, bgErr.message);
-                 await require('fs').promises.copyFile(inputPath, processedPath);
-               }
+              console.log(`[Background] Removing background for variant: ${colorSlug}...`);
+              try {
+                // Format URL as file:// for local paths in node
+                const bgBlob = await removeBackground(`file://${inputPath.replace(/\\\\/g, '/')}`);
+                const bgBuffer = Buffer.from(await bgBlob.arrayBuffer());
+                await writeFile(processedPath, bgBuffer);
+
+                await prisma.asset.create({
+                  data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id }
+                });
+                useImgPath = processedPath; // Use the transparent image for crops!
+              } catch (bgErr: any) {
+                console.error(`[Background] Failed to remove background for ${colorSlug}:`, bgErr.message);
+                await require('fs').promises.copyFile(inputPath, processedPath);
+              }
             } else {
-               // Fallback: just copy original to processed if module not found
-               await require('fs').promises.copyFile(inputPath, processedPath);
-               await prisma.asset.create({ 
-                 data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id } 
-               });
+              // Fallback: just copy original to processed if module not found
+              await require('fs').promises.copyFile(inputPath, processedPath);
+              await prisma.asset.create({
+                data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id }
+              });
             }
 
             // ── B. Social Crops ──
