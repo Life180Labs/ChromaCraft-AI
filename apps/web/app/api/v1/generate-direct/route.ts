@@ -3,6 +3,7 @@ import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
+import sharp from 'sharp';
 
 // ─── Gemini image generation helper ─────────────────────────────────────────
 
@@ -12,6 +13,7 @@ async function callGeminiImageAPI(
   promptText: string,
   referenceImageBase64: string,
   referenceImageMime: string,
+  maxRetries: number = 3,
 ): Promise<Buffer | null> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -36,25 +38,54 @@ async function callGeminiImageAPI(
     },
   };
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini API error (${res.status}): ${errText.slice(0, 500)}`);
-  }
-
-  const data = await res.json();
-  const candidates = data?.candidates || [];
-
-  for (const candidate of candidates) {
-    for (const part of candidate?.content?.parts || []) {
-      if (part?.inlineData?.mimeType?.startsWith('image/')) {
-        return Buffer.from(part.inlineData.data, 'base64');
+      if (!res.ok) {
+        const errText = await res.text();
+        const errLower = errText.toLowerCase();
+        
+        // Check for rate limit or quota errors
+        if (res.status === 429 || errLower.includes('quota') || errLower.includes('rate limit')) {
+          if (attempt < maxRetries - 1) {
+            // Exponential backoff: 2^attempt + random jitter
+            const sleepMs = (Math.pow(2, attempt) + (Math.random() + 0.5)) * 1000;
+            console.log(`   ⏳ [API] Rate limited (429). Backing off for ${(sleepMs / 1000).toFixed(1)}s...`);
+            await new Promise((resolve) => setTimeout(resolve, sleepMs));
+            continue;
+          }
+        }
+        throw new Error(`Gemini API error (${res.status}): ${errText.slice(0, 500)}`);
       }
+
+      const data = await res.json();
+      const candidates = data?.candidates || [];
+
+      for (const candidate of candidates) {
+        for (const part of candidate?.content?.parts || []) {
+          if (part?.inlineData?.mimeType?.startsWith('image/')) {
+            return Buffer.from(part.inlineData.data, 'base64');
+          }
+        }
+      }
+      
+      console.warn(`   ⚠️ [API] Warning: API returned empty image data.`);
+      return null;
+
+    } catch (err: any) {
+      const errorMsg = err.message.toLowerCase();
+      if ((errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('rate limit')) && attempt < maxRetries - 1) {
+        const sleepMs = (Math.pow(2, attempt) + (Math.random() + 0.5)) * 1000;
+        console.log(`   ⏳ [API] Rate limited. Backing off for ${(sleepMs / 1000).toFixed(1)}s...`);
+        await new Promise((resolve) => setTimeout(resolve, sleepMs));
+        continue;
+      }
+      throw err;
     }
   }
 
@@ -87,64 +118,16 @@ async function generateColorVariantWithGemini(
 //   while not operation.done: time.sleep(10); operation = client.operations.get(operation)
 //   video.video.save("output.mp4")
 
-// ── Step 1: Upload image to Gemini Files API ──────────────────────────────────
-
-async function uploadImageToGeminiFiles(
-  apiKey: string,
-  imageBuffer: Buffer,
-  mimeType: string,
-  displayName: string,
-): Promise<string> {
-  // Multipart upload to Gemini Files API
-  // POST https://generativelanguage.googleapis.com/upload/v1beta/files
-  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${apiKey}`;
-
-  const boundary = `----ChromaCraft${Date.now()}`;
-  const metadataJson = JSON.stringify({ file: { displayName } });
-
-  // Build the multipart body manually
-  const bodyParts: Buffer[] = [
-    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataJson}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
-    imageBuffer,
-    Buffer.from(`\r\n--${boundary}--`),
-  ];
-  const body = Buffer.concat(bodyParts);
-
-  const res = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': `multipart/related; boundary=${boundary}`,
-      'Content-Length': body.length.toString(),
-    },
-    body,
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini Files API upload failed (${res.status}): ${errText.slice(0, 500)}`);
-  }
-
-  const data = await res.json();
-  const fileUri = data?.file?.uri;
-  if (!fileUri) {
-    throw new Error(`Gemini Files API returned no URI: ${JSON.stringify(data).slice(0, 300)}`);
-  }
-
-  console.log(`[Video] Image uploaded to Gemini Files API. URI: ${fileUri}`);
-  return fileUri;
-}
-
-// ── Step 2+3: Generate video via Veo + poll until done ───────────────────────
+// ── Step 1: Generate video via Veo + poll until done ───────────────────────
 
 async function generateVideoWithVeo(
   apiKey: string,
   videoPrompt: string,
-  imageFileUri: string,
+  imageBase64: string,
   imageMimeType: string,
   videoModel: string = 'veo-3.1-generate-preview',
 ): Promise<string | null> {
-  // POST predictLongRunning with image input (mirrors Python client.models.generate_videos)
+  // POST predictLongRunning with image input
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
 
   const body = {
@@ -152,8 +135,7 @@ async function generateVideoWithVeo(
       {
         prompt: videoPrompt,
         image: {
-          bytesBase64Encoded: null, // Use URI-based reference, not inline bytes
-          fileUri: imageFileUri,
+          bytesBase64Encoded: imageBase64,
           mimeType: imageMimeType,
         },
       },
@@ -185,7 +167,7 @@ async function generateVideoWithVeo(
 
   console.log(`[Video] Operation started: ${operationName}. Polling for completion...`);
 
-  // ── Step 3: Poll until done (mirrors: while not operation.done: time.sleep(10)) ──
+  // ── Step 2: Poll until done (mirrors: while not operation.done: time.sleep(10)) ──
   const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
   const MAX_POLLS = 60; // up to 10 minutes
   const POLL_INTERVAL_MS = 10_000;
@@ -258,23 +240,6 @@ async function downloadVideoFromUri(
   return Buffer.from(arrayBuffer);
 }
 
-// ── Cleanup uploaded file from Gemini Files API ───────────────────────────────
-
-async function deleteGeminiFile(apiKey: string, fileUri: string): Promise<void> {
-  try {
-    // Extract file name from URI: "https://.../v1beta/files/FILE_ID" → "files/FILE_ID"
-    const match = fileUri.match(/\/v1beta\/(files\/[^?]+)/);
-    if (!match) return;
-    const fileName = match[1];
-    await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`, {
-      method: 'DELETE',
-    });
-    console.log(`[Video] Cleaned up Gemini file: ${fileName}`);
-  } catch (err) {
-    console.warn('[Video] Could not delete Gemini file:', err);
-  }
-}
-
 // ── Full video generation orchestrator ───────────────────────────────────────
 
 async function generateVideoWithGemini(
@@ -284,31 +249,17 @@ async function generateVideoWithGemini(
   referenceImageBuffer: Buffer,
   referenceImageMime: string,
 ): Promise<Buffer | null> {
-  let uploadedFileUri: string | null = null;
-  try {
-    // Step 1: Upload image to Gemini Files API
-    uploadedFileUri = await uploadImageToGeminiFiles(
-      apiKey,
-      referenceImageBuffer,
-      referenceImageMime,
-      `chromacraft_ref_${Date.now()}`,
-    );
+  // Convert buffer to base64 for direct inline usage in Veo API
+  const imageBase64 = referenceImageBuffer.toString('base64');
+  
+  // Step 1: Generate video via Veo + poll
+  const videoUri = await generateVideoWithVeo(apiKey, videoPrompt, imageBase64, referenceImageMime, videoModel);
+  if (!videoUri) return null;
 
-    // Step 2+3: Generate video via Veo + poll
-    const videoUri = await generateVideoWithVeo(apiKey, videoPrompt, uploadedFileUri, referenceImageMime, videoModel);
-    if (!videoUri) return null;
-
-    // Step 4: Download video bytes
-    const videoBuffer = await downloadVideoFromUri(apiKey, videoUri);
-    console.log(`[Video] Video downloaded successfully (${videoBuffer.length} bytes)`);
-    return videoBuffer;
-
-  } finally {
-    // Cleanup: delete uploaded file from Gemini Files API (like Python's finally block)
-    if (uploadedFileUri) {
-      await deleteGeminiFile(apiKey, uploadedFileUri);
-    }
-  }
+  // Step 2: Download video bytes
+  const videoBuffer = await downloadVideoFromUri(apiKey, videoUri);
+  console.log(`[Video] Video downloaded successfully (${videoBuffer.length} bytes)`);
+  return videoBuffer;
 }
 
 // ─── Compile spin frames into a preview image (pure Node.js / sharp) ─────────
@@ -532,53 +483,79 @@ export async function POST(req: NextRequest) {
         .replace(/\s+/g, '_')
         .replace(/[^A-Za-z0-9_-]/g, '');
 
-      // ── 2. Grid generation (via Python grid.py) ─────────────────────────────
-      const { existsSync } = require('fs');
-      const { spawn } = require('child_process');
+      // ── 2. Grid generation (Fault-Tolerant Compiler Matrix) ─────────────────────
+      const gridPath = path.join(jobAssetDir, `grid_${safePrefix}_production_grid.png`);
+      const gridCols = settings?.cols || 3;
+      const gridRows = Math.ceil(colors.length / gridCols);
 
-      const runScript = (args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> => {
-        return new Promise((resolve) => {
-          const py = spawn('python', args);
-          let stdout = '';
-          let stderr = '';
-          py.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-          py.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-          py.on('close', (code: number | null) => resolve({ exitCode: code, stdout, stderr }));
-        });
-      };
+      if (colors.length > 0) {
+        console.log(`\n[System] Assembling the ${gridCols}x${gridRows} Grid Matrix...`);
+        try {
+          const originalMeta = await sharp(originalAsset.path).metadata();
+          const imgWidth = originalMeta.width || 800;
+          const imgHeight = originalMeta.height || 600;
 
-      const gridScript = path.join(process.cwd(), '..', 'worker', 'python', 'grid.py');
-      const gridPath = path.join(jobAssetDir, `grid_${safePrefix}.png`);
-      const imagePaths = successResults.map(r => r.filePath!);
-      const labels = successResults.map(r => r.color);
-      const cols = settings?.cols || 4;
+          const gridWidth = imgWidth * gridCols;
+          const gridHeight = imgHeight * gridRows;
 
-      const gridArgs = [
-        gridScript,
-        '--images', ...imagePaths,
-        '--output', gridPath,
-        '--cols', String(cols),
-        '--labels', ...labels,
-        '--spacing', '15',
-        '--padding', '25',
-        '--borderRadius', '6',
-        '--watermark', 'ChromaCraft AI',
-        '--jsonMode'
-      ];
+          const compositeLayers = [];
 
-      try {
-        const { exitCode, stderr } = await runScript(gridArgs);
-        if (exitCode === 0 && existsSync(gridPath)) {
+          // Base canvas layer
+          compositeLayers.push({
+            input: { create: { width: gridWidth, height: gridHeight, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } } },
+            left: 0,
+            top: 0
+          });
+
+          // Map successful generation paths by color
+          const generatedImages = new Map<string, string>();
+          for (const res of successResults) {
+            generatedImages.set(res.color, res.filePath!);
+          }
+
+          // Fault-tolerant assembly looping over ALL colors
+          for (let i = 0; i < colors.length; i++) {
+            const color = colors[i];
+            // Fallback to the original image if this specific thread failed
+            const imgPath = generatedImages.get(color) || originalAsset.path;
+            
+            const col = i % gridCols;
+            const row = Math.floor(i / gridCols);
+            const left = col * imgWidth;
+            const top = row * imgHeight;
+
+            // Edge Case: Force dimension normalization in case the model hallucinated a different crop
+            const normalizedImgBuffer = await sharp(imgPath)
+              .resize(imgWidth, imgHeight, { fit: 'fill', kernel: 'lanczos3' })
+              .toBuffer();
+
+            compositeLayers.push({
+              input: normalizedImgBuffer,
+              left,
+              top
+            });
+          }
+
+          // Output the grid
+          await sharp({
+            create: {
+              width: gridWidth,
+              height: gridHeight,
+              channels: 4,
+              background: { r: 255, g: 255, b: 255, alpha: 1 }
+            }
+          })
+          .composite(compositeLayers)
+          .toFile(gridPath);
+
           await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'grid' } });
           await prisma.asset.create({
             data: { jobId: job.id, type: 'grid', path: gridPath, status: 'done' }
           });
-          console.log('Grid collage generated successfully at:', gridPath);
-        } else {
-          console.error('Grid generation script failed:', stderr);
+          console.log(`🚀 Pipeline execution complete! Final output ready at: ${gridPath}`);
+        } catch (err: any) {
+          console.error('CRITICAL: Failed to assemble grid matrix:', err.message);
         }
-      } catch (err) {
-        console.error('Failed to run grid.py:', err);
       }
 
       // ── 3. Video generation via Gemini Veo (image-to-video) ───────────────
@@ -709,49 +686,104 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── 5. Background removal and social crops (via process.py) ──────────────
-      const processScript = path.join(process.cwd(), '..', 'worker', 'python', 'process.py');
+      // ── 5. Background Removal & Social Crops (via Node Native) ───────────────
       const processedDir = path.join(jobAssetDir, 'processed');
+      if (settings?.cropsEnabled !== false || settings?.removeBackground !== false) {
+        console.log('\\n[System] Generating background-removed images and social media crops natively...');
+        if (!require('fs').existsSync(processedDir)) {
+          require('fs').mkdirSync(processedDir, { recursive: true });
+        }
+        
+        // Dynamically load background removal module
+        let removeBackground: any = null;
+        try {
+          const imgly = await import('@imgly/background-removal-node');
+          removeBackground = imgly.removeBackground;
+        } catch (e: any) {
+          console.warn('⚠️ Could not load @imgly/background-removal-node. Skipping background removal:', e.message);
+        }
 
-      const processArgs = [
-        processScript,
-        '--inputDir', jobAssetDir,
-        '--outputDir', processedDir,
-        '--prefix', safePrefix,
-        '--refImage', originalAsset.path,
-        '--jsonMode'
-      ];
-      if (settings?.cropsEnabled !== false) {
-        processArgs.push('--socialCrops');
-      }
+        try {
+          for (const result of successResults) {
+            const inputPath = result.filePath!;
+            const colorSlug = result.color.replace(/\\s+/g, '_');
+            
+            // ── A. Background Removal ──
+            const processedPath = path.join(processedDir, `raw_${colorSlug}.png`);
+            let useImgPath = inputPath; // default to original if bg removal fails
+            
+            if (removeBackground) {
+               console.log(`[Background] Removing background for variant: ${colorSlug}...`);
+               try {
+                 // Format URL as file:// for local paths in node
+                 const bgBlob = await removeBackground(`file://${inputPath.replace(/\\\\/g, '/')}`);
+                 const bgBuffer = Buffer.from(await bgBlob.arrayBuffer());
+                 await writeFile(processedPath, bgBuffer);
+                 
+                 await prisma.asset.create({ 
+                   data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id } 
+                 });
+                 useImgPath = processedPath; // Use the transparent image for crops!
+               } catch (bgErr: any) {
+                 console.error(`[Background] Failed to remove background for ${colorSlug}:`, bgErr.message);
+                 await require('fs').promises.copyFile(inputPath, processedPath);
+               }
+            } else {
+               // Fallback: just copy original to processed if module not found
+               await require('fs').promises.copyFile(inputPath, processedPath);
+               await prisma.asset.create({ 
+                 data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id } 
+               });
+            }
 
-      try {
-        console.log('Running process.py for background removal and social crops...');
-        const { exitCode, stderr } = await runScript(processArgs);
-        if (exitCode === 0) {
-          console.log('process.py finished successfully');
-          if (existsSync(processedDir)) {
-            const files = require('fs').readdirSync(processedDir);
-            for (const file of files) {
-              if (file.endsWith('.png')) {
-                const filePath = path.join(processedDir, file);
-                const isCrop = file.includes('_instagram') || file.includes('_banner') || file.includes('_story');
-                const assetType = isCrop ? 'crop' : 'processed';
+            // ── B. Social Crops ──
+            if (settings?.cropsEnabled !== false) {
+              const metadata = await sharp(useImgPath).metadata();
+              const w = metadata.width || 800;
+              const h = metadata.height || 600;
+              const currentAspect = w / h;
 
-                await prisma.asset.deleteMany({
-                  where: { jobId: job.id, type: assetType, path: filePath }
-                });
-                await prisma.asset.create({
-                  data: { jobId: job.id, type: assetType, path: filePath, status: 'approved' }
-                });
+              // 1. Instagram 1:1
+              const sqSize = Math.min(w, h);
+              const sqLeft = Math.floor((w - sqSize) / 2);
+              const sqTop = Math.floor((h - sqSize) / 2);
+              const instaPath = path.join(processedDir, `${safePrefix}_${colorSlug}_instagram.png`);
+              await sharp(useImgPath).extract({ left: sqLeft, top: sqTop, width: sqSize, height: sqSize }).toFile(instaPath);
+              await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: instaPath, status: 'approved' } });
+
+              // 2. Banner 16:9
+              const targetAspectBanner = 16.0 / 9.0;
+              let bW = w, bH = h, bLeft = 0, bTop = 0;
+              if (currentAspect > targetAspectBanner) {
+                bW = Math.floor(h * targetAspectBanner);
+                bLeft = Math.floor((w - bW) / 2);
+              } else {
+                bH = Math.floor(w / targetAspectBanner);
+                bTop = Math.floor((h - bH) / 2);
               }
+              const bannerPath = path.join(processedDir, `${safePrefix}_${colorSlug}_banner.png`);
+              await sharp(useImgPath).extract({ left: bLeft, top: bTop, width: bW, height: bH }).toFile(bannerPath);
+              await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: bannerPath, status: 'approved' } });
+
+              // 3. Story 9:16
+              const targetAspectStory = 9.0 / 16.0;
+              let sW = w, sH = h, sLeft = 0, sTop = 0;
+              if (currentAspect > targetAspectStory) {
+                sW = Math.floor(h * targetAspectStory);
+                sLeft = Math.floor((w - sW) / 2);
+              } else {
+                sH = Math.floor(w / targetAspectStory);
+                sTop = Math.floor((h - sH) / 2);
+              }
+              const storyPath = path.join(processedDir, `${safePrefix}_${colorSlug}_story.png`);
+              await sharp(useImgPath).extract({ left: sLeft, top: sTop, width: sW, height: sH }).toFile(storyPath);
+              await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: storyPath, status: 'approved' } });
             }
           }
-        } else {
-          console.error('process.py failed:', stderr);
+          console.log('Native social media crops generated successfully');
+        } catch (err: any) {
+          console.error('Failed to generate native crops:', err.message);
         }
-      } catch (err) {
-        console.error('Failed to run process.py:', err);
       }
     }
 
