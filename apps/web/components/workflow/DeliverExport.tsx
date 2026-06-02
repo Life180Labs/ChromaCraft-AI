@@ -56,13 +56,15 @@ export const DeliverExport: React.FC<DeliverExportProps> = ({
   ) || [];
   const videoAsset = selectedJob?.assets?.find(a => a.type === 'video');
   const gridAsset = selectedJob?.assets?.find(a => a.type === 'grid');
+  const spinAsset = selectedJob?.assets?.find(a => a.type === 'spin');
 
   // Include done/pending assets as deliverable (not just 'approved')
   const deliverableStatuses = ['approved', 'done', 'pending'];
   const approvedVariants = variantAssets.filter(a => deliverableStatuses.includes(a.status));
   const approvedVideo = videoAsset && deliverableStatuses.includes(videoAsset.status) ? videoAsset : null;
   const approvedGrid = gridAsset && deliverableStatuses.includes(gridAsset.status) ? gridAsset : null;
-  const totalApproved = approvedVariants.length + (approvedVideo ? 1 : 0) + (approvedGrid ? 1 : 0);
+  const approvedSpin = spinAsset && deliverableStatuses.includes(spinAsset.status) ? spinAsset : null;
+  const totalApproved = approvedVariants.length + (approvedVideo ? 1 : 0) + (approvedGrid ? 1 : 0) + (approvedSpin ? 1 : 0);
   const totalCount = variantAssets.length;
 
   return (
@@ -329,30 +331,79 @@ export const DeliverExport: React.FC<DeliverExportProps> = ({
           )}
 
           {/* Approved video */}
-          {approvedVideo && (
+          {approvedVideo && (() => {
+            const isVideoFile = approvedVideo.path.endsWith('.mp4') || approvedVideo.path.endsWith('.webm') || approvedVideo.path.endsWith('.mov');
+            const label = isVideoFile ? 'Approved Showcase Video' : 'Approved Showcase Still (Video Fallback)';
+            return (
+              <div className="card" style={{ padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, borderBottom: '1px solid var(--bd)', paddingBottom: 10 }}>
+                  <TbVideo size={14} style={{ color: 'var(--acc)' }} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
+                  <span className="badge b-green" style={{ marginLeft: 'auto' }}>Approved</span>
+                </div>
+                {isVideoFile ? (
+                  <video
+                    src={`/api/v1/assets?id=${approvedVideo.id}`}
+                    autoPlay loop muted playsInline
+                    style={{ width: '100%', maxHeight: 320, borderRadius: 6, border: '1px solid var(--bd)', background: '#000', marginBottom: 12 }}
+                  />
+                ) : (
+                  <img
+                    src={`/api/v1/assets?id=${approvedVideo.id}`}
+                    alt="Showcase Still"
+                    style={{ width: '100%', maxHeight: 320, borderRadius: 6, border: '1px solid var(--bd)', objectFit: 'contain', marginBottom: 12 }}
+                  />
+                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <a
+                    href={`/api/v1/assets?id=${approvedVideo.id}`}
+                    download={isVideoFile ? "showcase_video.mp4" : "showcase_still.png"}
+                    style={{ textDecoration: 'none' }}
+                  >
+                    <Button id="download-video-btn" variant="primary">
+                      <TbDownload size={14} style={{ marginRight: 6 }} /> Download {isVideoFile ? 'Video' : 'Still'}
+                    </Button>
+                  </a>
+                  <a
+                    href={`/api/v1/assets?id=${approvedVideo.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: 'none' }}
+                  >
+                    <Button variant="outline">
+                      <TbExternalLink size={14} style={{ marginRight: 6 }} /> Open in New Tab
+                    </Button>
+                  </a>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Approved 360 spin */}
+          {approvedSpin && (
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, borderBottom: '1px solid var(--bd)', paddingBottom: 10 }}>
-                <TbVideo size={14} style={{ color: 'var(--acc)' }} />
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Approved Showcase Video</span>
+                <TbPhoto size={14} style={{ color: 'var(--acc)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>360° Turntable Spin</span>
                 <span className="badge b-green" style={{ marginLeft: 'auto' }}>Approved</span>
               </div>
-              <video
-                src={`/api/v1/assets?id=${approvedVideo.id}`}
-                autoPlay loop muted playsInline
-                style={{ width: '100%', maxHeight: 320, borderRadius: 6, border: '1px solid var(--bd)', background: '#000', marginBottom: 12 }}
+              <img
+                src={`/api/v1/assets?id=${approvedSpin.id}`}
+                alt="360 Turntable"
+                style={{ width: '100%', maxHeight: 360, borderRadius: 6, border: '1px solid var(--bd)', objectFit: 'contain', marginBottom: 12 }}
               />
               <div style={{ display: 'flex', gap: 8 }}>
                 <a
-                  href={`/api/v1/assets?id=${approvedVideo.id}`}
-                  download="showcase_video.mp4"
+                  href={`/api/v1/assets?id=${approvedSpin.id}`}
+                  download="360_turntable.gif"
                   style={{ textDecoration: 'none' }}
                 >
-                  <Button id="download-video-btn" variant="primary">
-                    <TbDownload size={14} style={{ marginRight: 6 }} /> Download Video (MP4)
+                  <Button id="download-spin-btn" variant="primary">
+                    <TbDownload size={14} style={{ marginRight: 6 }} /> Download 360° Spin
                   </Button>
                 </a>
                 <a
-                  href={`/api/v1/assets?id=${approvedVideo.id}`}
+                  href={`/api/v1/assets?id=${approvedSpin.id}`}
                   target="_blank"
                   rel="noreferrer"
                   style={{ textDecoration: 'none' }}

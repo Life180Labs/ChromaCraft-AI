@@ -3,34 +3,17 @@ import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import { spawn } from 'child_process';
 
-function runPythonScript(args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const py = spawn('python', args);
-    let stdout = '';
-    let stderr = '';
-    py.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    py.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    py.on('close', (code) => {
-      resolve({ exitCode: code, stdout, stderr });
-    });
-  });
-}
+// ─── Gemini image generation helper ─────────────────────────────────────────
 
-// ─── Gemini direct generation (no BullMQ) ───────────────────────────────────
-
-async function generateColorVariantWithGemini(
+async function callGeminiImageAPI(
   apiKey: string,
   model: string,
-  prompt: string,
+  promptText: string,
   referenceImageBase64: string,
   referenceImageMime: string,
-  colorName: string,
 ): Promise<Buffer | null> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const colorPrompt = prompt.replace(/\[COLOR\]/gi, colorName).replace(/\[color\]/gi, colorName);
 
   const body = {
     contents: [
@@ -43,7 +26,7 @@ async function generateColorVariantWithGemini(
             },
           },
           {
-            text: colorPrompt,
+            text: promptText,
           },
         ],
       },
@@ -78,32 +61,111 @@ async function generateColorVariantWithGemini(
   return null;
 }
 
-async function generateVideoWithGemini(
+// ─── Color variant generation ────────────────────────────────────────────────
+
+async function generateColorVariantWithGemini(
   apiKey: string,
   model: string,
   prompt: string,
   referenceImageBase64: string,
   referenceImageMime: string,
+  colorName: string,
 ): Promise<Buffer | null> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning?key=${apiKey}`;
+  const colorPrompt = prompt.replace(/\[COLOR\]/gi, colorName).replace(/\[color\]/gi, colorName);
+  return callGeminiImageAPI(apiKey, model, colorPrompt, referenceImageBase64, referenceImageMime);
+}
+
+// ─── Video generation via Gemini Veo (image-to-video) ────────────────────────
+//
+// Step 1: Upload reference image to Gemini Files API → get fileUri
+// Step 2: Call veo-3.1-generate-preview:predictLongRunning with image fileUri
+// Step 3: Poll the long-running operation until done
+// Step 4: Download the MP4 video bytes
+//
+// This mirrors the Python SDK pattern:
+//   operation = client.models.generate_videos(model="veo-3.1-generate-preview", prompt=..., image=...)
+//   while not operation.done: time.sleep(10); operation = client.operations.get(operation)
+//   video.video.save("output.mp4")
+
+// ── Step 1: Upload image to Gemini Files API ──────────────────────────────────
+
+async function uploadImageToGeminiFiles(
+  apiKey: string,
+  imageBuffer: Buffer,
+  mimeType: string,
+  displayName: string,
+): Promise<string> {
+  // Multipart upload to Gemini Files API
+  // POST https://generativelanguage.googleapis.com/upload/v1beta/files
+  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${apiKey}`;
+
+  const boundary = `----ChromaCraft${Date.now()}`;
+  const metadataJson = JSON.stringify({ file: { displayName } });
+
+  // Build the multipart body manually
+  const bodyParts: Buffer[] = [
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataJson}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+    imageBuffer,
+    Buffer.from(`\r\n--${boundary}--`),
+  ];
+  const body = Buffer.concat(bodyParts);
+
+  const res = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'Content-Length': body.length.toString(),
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini Files API upload failed (${res.status}): ${errText.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  const fileUri = data?.file?.uri;
+  if (!fileUri) {
+    throw new Error(`Gemini Files API returned no URI: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+
+  console.log(`[Video] Image uploaded to Gemini Files API. URI: ${fileUri}`);
+  return fileUri;
+}
+
+// ── Step 2+3: Generate video via Veo + poll until done ───────────────────────
+
+async function generateVideoWithVeo(
+  apiKey: string,
+  videoPrompt: string,
+  imageFileUri: string,
+  imageMimeType: string,
+  videoModel: string = 'veo-3.1-generate-preview',
+): Promise<string | null> {
+  // POST predictLongRunning with image input (mirrors Python client.models.generate_videos)
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
 
   const body = {
     instances: [
       {
-        prompt: prompt,
+        prompt: videoPrompt,
         image: {
-          mimeType: referenceImageMime,
-          bytesBase64Encoded: referenceImageBase64,
+          bytesBase64Encoded: null, // Use URI-based reference, not inline bytes
+          fileUri: imageFileUri,
+          mimeType: imageMimeType,
         },
       },
     ],
     parameters: {
       aspectRatio: '16:9',
-      resolution: '720p',
-      durationSeconds: 5,
+      durationSeconds: 8,
+      sampleCount: 1,
     },
   };
 
+  console.log(`[Video] Starting Veo video generation with model: ${videoModel}`);
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -112,50 +174,204 @@ async function generateVideoWithGemini(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini Video API error (${res.status}): ${errText.slice(0, 500)}`);
+    throw new Error(`Veo predictLongRunning failed (${res.status}): ${errText.slice(0, 600)}`);
   }
 
-  const data = await res.json();
-  const operationName = data?.name;
+  const initData = await res.json();
+  const operationName = initData?.name;
   if (!operationName) {
-    throw new Error(`No operation name returned for long-running video generation: ${JSON.stringify(data)}`);
+    throw new Error(`Veo returned no operation name: ${JSON.stringify(initData).slice(0, 300)}`);
   }
 
-  console.log(`Successfully started video generation task. Operation: ${operationName}. Polling for completion...`);
+  console.log(`[Video] Operation started: ${operationName}. Polling for completion...`);
 
+  // ── Step 3: Poll until done (mirrors: while not operation.done: time.sleep(10)) ──
   const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
-  
-  // Poll every 5 seconds for a maximum of 120 seconds
-  for (let attempt = 0; attempt < 24; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    
+  const MAX_POLLS = 60; // up to 10 minutes
+  const POLL_INTERVAL_MS = 10_000;
+
+  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
     const pollRes = await fetch(pollUrl);
     if (!pollRes.ok) {
-      console.warn(`Polling attempt ${attempt + 1} failed: ${pollRes.status}`);
+      console.warn(`[Video] Poll attempt ${attempt + 1} failed (${pollRes.status}), retrying...`);
       continue;
     }
-    
+
     const pollData = await pollRes.json();
+    console.log(`[Video] Poll ${attempt + 1}/${MAX_POLLS}: done=${pollData.done}`);
+
     if (pollData.done) {
       if (pollData.error) {
-        throw new Error(`Video generation operation failed: ${pollData.error.message || JSON.stringify(pollData.error)}`);
+        throw new Error(`Veo operation failed: ${pollData.error.message || JSON.stringify(pollData.error)}`);
       }
-      
-      const response = pollData.response;
-      const generatedVideos = response?.generatedVideos || [];
+
+      // Extract video download URI from response
+      const generatedVideos = pollData.response?.generatedVideos || pollData.response?.videos || [];
       for (const videoObj of generatedVideos) {
-        const bytes = videoObj?.video?.bytesBase64Encoded || videoObj?.video?.videoBytes;
-        if (bytes) {
-          return Buffer.from(bytes, 'base64');
+        const videoUri = videoObj?.video?.uri || videoObj?.uri;
+        if (videoUri) {
+          console.log(`[Video] Generation complete. Video URI: ${videoUri}`);
+          return videoUri;
+        }
+        // Also check for inline bytes
+        const videoBytes = videoObj?.video?.bytesBase64Encoded || videoObj?.video?.videoBytes;
+        if (videoBytes) {
+          console.log(`[Video] Generation complete (inline bytes).`);
+          return `data:video/mp4;base64,${videoBytes}`;
         }
       }
-      
-      throw new Error(`Operation marked done but no video data found in response: ${JSON.stringify(pollData)}`);
+
+      throw new Error(`Veo operation done but no video in response: ${JSON.stringify(pollData).slice(0, 500)}`);
     }
   }
 
-  throw new Error(`Video generation timed out after 120 seconds.`);
+  throw new Error(`Veo video generation timed out after ${MAX_POLLS * POLL_INTERVAL_MS / 1000}s`);
 }
+
+// ── Step 4: Download video from URI → Buffer ──────────────────────────────────
+
+async function downloadVideoFromUri(
+  apiKey: string,
+  videoUri: string,
+): Promise<Buffer> {
+  // Handle inline base64 data URIs (e.g. "data:video/mp4;base64,...")
+  if (videoUri.startsWith('data:')) {
+    const base64 = videoUri.split(',')[1];
+    return Buffer.from(base64, 'base64');
+  }
+
+  // Handle Gemini Files API URIs — need to fetch via files download endpoint
+  // URI format: "https://generativelanguage.googleapis.com/v1beta/files/FILE_ID"
+  // Download via: GET <uri>?alt=media&key=API_KEY
+  const downloadUrl = videoUri.includes('?')
+    ? `${videoUri}&alt=media&key=${apiKey}`
+    : `${videoUri}?alt=media&key=${apiKey}`;
+
+  const res = await fetch(downloadUrl);
+  if (!res.ok) {
+    throw new Error(`Video download failed (${res.status}): ${await res.text().then(t => t.slice(0, 300))}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+// ── Cleanup uploaded file from Gemini Files API ───────────────────────────────
+
+async function deleteGeminiFile(apiKey: string, fileUri: string): Promise<void> {
+  try {
+    // Extract file name from URI: "https://.../v1beta/files/FILE_ID" → "files/FILE_ID"
+    const match = fileUri.match(/\/v1beta\/(files\/[^?]+)/);
+    if (!match) return;
+    const fileName = match[1];
+    await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`, {
+      method: 'DELETE',
+    });
+    console.log(`[Video] Cleaned up Gemini file: ${fileName}`);
+  } catch (err) {
+    console.warn('[Video] Could not delete Gemini file:', err);
+  }
+}
+
+// ── Full video generation orchestrator ───────────────────────────────────────
+
+async function generateVideoWithGemini(
+  apiKey: string,
+  videoModel: string,
+  videoPrompt: string,
+  referenceImageBuffer: Buffer,
+  referenceImageMime: string,
+): Promise<Buffer | null> {
+  let uploadedFileUri: string | null = null;
+  try {
+    // Step 1: Upload image to Gemini Files API
+    uploadedFileUri = await uploadImageToGeminiFiles(
+      apiKey,
+      referenceImageBuffer,
+      referenceImageMime,
+      `chromacraft_ref_${Date.now()}`,
+    );
+
+    // Step 2+3: Generate video via Veo + poll
+    const videoUri = await generateVideoWithVeo(apiKey, videoPrompt, uploadedFileUri, referenceImageMime, videoModel);
+    if (!videoUri) return null;
+
+    // Step 4: Download video bytes
+    const videoBuffer = await downloadVideoFromUri(apiKey, videoUri);
+    console.log(`[Video] Video downloaded successfully (${videoBuffer.length} bytes)`);
+    return videoBuffer;
+
+  } finally {
+    // Cleanup: delete uploaded file from Gemini Files API (like Python's finally block)
+    if (uploadedFileUri) {
+      await deleteGeminiFile(apiKey, uploadedFileUri);
+    }
+  }
+}
+
+// ─── Compile spin frames into a preview image (pure Node.js / sharp) ─────────
+//
+// Creates a horizontal contact sheet from the first 8 frames (showing different angles)
+// as a PNG using sharp — no extra dependencies needed.
+// Falls back to returning the first frame buffer if sharp fails.
+
+async function compileAnimatedGIF(frames: Buffer[], _delayMs: number = 200): Promise<Buffer> {
+  if (frames.length === 0) throw new Error('No frames provided for GIF compilation');
+  if (frames.length === 1) return frames[0];
+
+  try {
+    // Use sharp to create a horizontal contact sheet of up to 8 frames
+    // This gives the user a preview without requiring GIF encoding
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sharp = require('sharp');
+
+    // Use up to 8 evenly-spaced frames for the contact sheet
+    const maxFrames = Math.min(frames.length, 8);
+    const step = Math.floor(frames.length / maxFrames);
+    const selectedFrames = Array.from({ length: maxFrames }, (_, i) => frames[i * step]);
+
+    // Get dimensions from the first frame
+    const meta = await sharp(selectedFrames[0]).metadata();
+    const frameW = meta.width || 400;
+    const frameH = meta.height || 400;
+
+    // Resize each frame to a consistent size
+    const THUMB_W = 300;
+    const THUMB_H = Math.round((THUMB_W / frameW) * frameH);
+
+    const resizedFrames = await Promise.all(
+      selectedFrames.map(f =>
+        sharp(f).resize(THUMB_W, THUMB_H, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } }).png().toBuffer()
+      )
+    );
+
+    // Composite them horizontally
+    const totalWidth = THUMB_W * resizedFrames.length;
+    const totalHeight = THUMB_H;
+
+    const composites = resizedFrames.map((buf, i) => ({
+      input: buf,
+      left: i * THUMB_W,
+      top: 0,
+    }));
+
+    const contactSheet = await sharp({
+      create: { width: totalWidth, height: totalHeight, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+    })
+      .composite(composites)
+      .png()
+      .toBuffer();
+
+    return contactSheet;
+  } catch (err) {
+    console.warn('Contact sheet compilation failed, returning first frame:', err);
+    return frames[0];
+  }
+}
+
+// ─── 360 Spin frame generation ───────────────────────────────────────────────
 
 async function generateSpinFrameWithGemini(
   apiKey: string,
@@ -164,58 +380,13 @@ async function generateSpinFrameWithGemini(
   referenceImageMime: string,
   angle: number,
 ): Promise<Buffer | null> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
   // Locked geometry prompt per angle
-  const prompt = `Generate a high-quality product photo of the item rotated horizontally by exactly ${angle} degrees relative to the camera. Maintain locked geometry, original colors, texture, shape, proportions, and details perfectly. Show the product on a clean studio white background under uniform lighting.`;
+  const prompt = `Generate a high-quality product photo of the same item rotated horizontally by exactly ${angle} degrees relative to the camera. Maintain completely locked geometry, original colors, texture, shape, proportions, and fine details. Show the product on a clean studio white background under uniform soft lighting. Do not change any features of the product.`;
 
-  const body = {
-    contents: [
-      {
-        parts: [
-          {
-            inlineData: {
-              mimeType: referenceImageMime,
-              data: referenceImageBase64,
-            },
-          },
-          {
-            text: prompt,
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ['IMAGE'],
-    },
-  };
-
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini Image API error (${res.status}): ${errText.slice(0, 500)}`);
-  }
-
-  const data = await res.json();
-  const candidates = data?.candidates || [];
-
-  for (const candidate of candidates) {
-    for (const part of candidate?.content?.parts || []) {
-      if (part?.inlineData?.mimeType?.startsWith('image/')) {
-        return Buffer.from(part.inlineData.data, 'base64');
-      }
-    }
-  }
-
-  return null;
+  return callGeminiImageAPI(apiKey, model, prompt, referenceImageBase64, referenceImageMime);
 }
 
-// ─── Main handler ────────────────────────────────────────────────────────────
+// ─── Main handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
@@ -269,6 +440,7 @@ export async function POST(req: NextRequest) {
     // Model config
     const imageModel = settings?.imageModel || 'gemini-2.0-flash-preview-image-generation';
     const colors: string[] = settings?.colors || ['White', 'Black', 'Blue', 'Red'];
+    const videoPromptText = settings?.videoPrompt || 'Cinematic showcase of the product under dynamic studio lighting';
 
     // Update job status to PROCESSING
     await prisma.job.update({
@@ -296,7 +468,7 @@ export async function POST(req: NextRequest) {
     const jobAssetDir = path.join(baseStorage, 'assets', String(job.id));
     await mkdir(jobAssetDir, { recursive: true });
 
-    // Generate per color concurrently (max 3 at a time)
+    // ── 1. Generate color variants ────────────────────────────────────────────
     const results: { color: string; assetId?: number; error?: string; filePath?: string }[] = [];
 
     const generateColor = async (colorName: string) => {
@@ -315,13 +487,11 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // Save file
         const safeColor = colorName.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '').toLowerCase();
         const filename = `raw_${safeColor}.png`;
         const filePath = path.join(jobAssetDir, filename);
         await writeFile(filePath, imgBuffer);
 
-        // Upsert asset in DB
         const existing = await prisma.asset.findFirst({
           where: { jobId: job.id, type: 'variant', path: filePath },
         });
@@ -362,7 +532,21 @@ export async function POST(req: NextRequest) {
         .replace(/\s+/g, '_')
         .replace(/[^A-Za-z0-9_-]/g, '');
 
-      // 1. Grid generation
+      // ── 2. Grid generation (via Python grid.py) ─────────────────────────────
+      const { existsSync } = require('fs');
+      const { spawn } = require('child_process');
+
+      const runScript = (args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> => {
+        return new Promise((resolve) => {
+          const py = spawn('python', args);
+          let stdout = '';
+          let stderr = '';
+          py.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+          py.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+          py.on('close', (code: number | null) => resolve({ exitCode: code, stdout, stderr }));
+        });
+      };
+
       const gridScript = path.join(process.cwd(), '..', 'worker', 'python', 'grid.py');
       const gridPath = path.join(jobAssetDir, `grid_${safePrefix}.png`);
       const imagePaths = successResults.map(r => r.filePath!);
@@ -383,14 +567,13 @@ export async function POST(req: NextRequest) {
       ];
 
       try {
-        const { exitCode, stderr } = await runPythonScript(gridArgs);
-        if (exitCode === 0 && require('fs').existsSync(gridPath)) {
-          await prisma.asset.deleteMany({
-            where: { jobId: job.id, type: 'grid' }
-          });
+        const { exitCode, stderr } = await runScript(gridArgs);
+        if (exitCode === 0 && existsSync(gridPath)) {
+          await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'grid' } });
           await prisma.asset.create({
-            data: { jobId: job.id, type: 'grid', path: gridPath, status: 'pending' }
+            data: { jobId: job.id, type: 'grid', path: gridPath, status: 'done' }
           });
+          console.log('Grid collage generated successfully at:', gridPath);
         } else {
           console.error('Grid generation script failed:', stderr);
         }
@@ -398,45 +581,60 @@ export async function POST(req: NextRequest) {
         console.error('Failed to run grid.py:', err);
       }
 
-      // 2. Video generation
+      // ── 3. Video generation via Gemini Veo (image-to-video) ───────────────
       if (settings?.videoEnabled === true) {
-        const videoModel = settings?.videoModel || 'veo-2.0-generate-001';
-        const videoPromptText = settings?.videoPrompt || 'Cinematic showcase of the product under dynamic studio lighting';
+        const videoModel = settings?.videoModel || 'veo-3.1-generate-preview';
         const videoPath = path.join(jobAssetDir, `${safePrefix}_showcase.mp4`);
 
-        let generatedVideoBuffer: Buffer | null = null;
+        console.log(`[Video] Starting Veo video generation (model: ${videoModel})...`);
         try {
-          console.log(`Attempting Gemini video generation with model: ${videoModel}`);
-          generatedVideoBuffer = await generateVideoWithGemini(
+          const videoBuffer = await generateVideoWithGemini(
             geminiProvider.apiKey,
             videoModel,
             videoPromptText,
-            refImageBase64,
-            refImageMime
+            refImageBuffer, // Pass original Buffer, not base64
+            refImageMime,
           );
-        } catch (err: any) {
-          console.error('Gemini Video generation failed:', err.message);
-        }
 
-        if (generatedVideoBuffer) {
-          try {
-            await writeFile(videoPath, generatedVideoBuffer);
+          if (videoBuffer) {
+            await writeFile(videoPath, videoBuffer);
             await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'video' } });
             await prisma.asset.create({
-              data: { jobId: job.id, type: 'video', path: videoPath, status: 'pending' }
+              data: { jobId: job.id, type: 'video', path: videoPath, status: 'done' }
             });
-            console.log('Video generated via Gemini model successfully');
-          } catch (err) {
-            console.error('Failed to write Gemini video to disk:', err);
+            console.log(`[Video] MP4 saved successfully at: ${videoPath} (${videoBuffer.length} bytes)`);
+          } else {
+            console.warn('[Video] generateVideoWithGemini returned null — no video saved');
+          }
+        } catch (err: any) {
+          console.error('[Video] Veo generation failed:', err.message);
+          // Graceful fallback: generate a high-quality showcase still image
+          // so the video slot isn't empty in the review UI
+          try {
+            const fallbackPrompt = `${videoPromptText}. Cinematic product showcase — dramatic studio hero shot with premium lighting.`;
+            const fallbackBuffer = await callGeminiImageAPI(
+              geminiProvider.apiKey, imageModel, fallbackPrompt, refImageBase64, refImageMime
+            );
+            if (fallbackBuffer) {
+              const fallbackPath = path.join(jobAssetDir, `${safePrefix}_showcase_still.png`);
+              await writeFile(fallbackPath, fallbackBuffer);
+              await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'video' } });
+              await prisma.asset.create({
+                data: { jobId: job.id, type: 'video', path: fallbackPath, status: 'done' }
+              });
+              console.log('[Video] Fallback showcase still saved at:', fallbackPath);
+            }
+          } catch (fallbackErr: any) {
+            console.error('[Video] Fallback still also failed:', fallbackErr.message);
           }
         }
       }
 
-      // 2.5 360 Spin generation (0° to 350° in 10° steps)
+      // ── 4. 360 Spin generation (0° to 350° in 10° steps) ───────────────────
       if (settings?.spinEnabled === true) {
         console.log('Starting 360 spin frame generation using Image-to-Image...');
         const angles = Array.from({ length: 36 }, (_, i) => i * 10);
-        const spinResults: { angle: number; filePath: string }[] = [];
+        const spinResults: { angle: number; filePath: string; buffer: Buffer }[] = [];
 
         const generateAngleFrame = async (angle: number) => {
           try {
@@ -452,7 +650,7 @@ export async function POST(req: NextRequest) {
               const filename = `${safePrefix}_360_${String(angle).padStart(3, '0')}.png`;
               const filePath = path.join(jobAssetDir, filename);
               await writeFile(filePath, frameBuffer);
-              spinResults.push({ angle, filePath });
+              spinResults.push({ angle, filePath, buffer: frameBuffer });
             }
           } catch (err: any) {
             console.error(`Failed to generate 360 spin frame for angle ${angle}:`, err.message);
@@ -469,41 +667,52 @@ export async function POST(req: NextRequest) {
         console.log(`Generated ${spinResults.length}/36 spin frames.`);
 
         if (spinResults.length > 0) {
-          // Compile turntable GIF using multiview.py
-          const spinScript = path.join(process.cwd(), '..', 'worker', 'python', 'multiview.py');
-          const turntableGifPath = path.join(jobAssetDir, `${safePrefix}_turntable.gif`);
-          const spinArgs = [
-            spinScript,
-            '--task', 'turntable_gif',
-            '--refImage', originalAsset.path,
-            '--outDir', jobAssetDir,
-            '--prefix', safePrefix,
-            '--jsonMode'
-          ];
+          // Sort frames by angle
+          spinResults.sort((a, b) => a.angle - b.angle);
+
+          // Compile contact sheet from spin frames (uses sharp, no extra deps)
+          const spinGifPath = path.join(jobAssetDir, `${safePrefix}_turntable.png`);
           try {
-            console.log('Compiling turntable GIF with multiview.py...');
-            const { exitCode, stderr } = await runPythonScript(spinArgs);
-            if (exitCode === 0 && require('fs').existsSync(turntableGifPath)) {
-              console.log('Turntable GIF compiled successfully at:', turntableGifPath);
-              await prisma.asset.deleteMany({
-                where: { jobId: job.id, type: 'spin' }
-              });
-              await prisma.asset.create({
-                data: { jobId: job.id, type: 'spin', path: turntableGifPath, status: 'pending' }
-              });
-            } else {
-              console.error('Failed to compile turntable GIF:', stderr);
-            }
+            const spinBuffers = spinResults.map(r => r.buffer);
+            const gifBuffer = await compileAnimatedGIF(spinBuffers, 80);
+            await writeFile(spinGifPath, gifBuffer);
+
+            await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'spin' } });
+            await prisma.asset.create({
+              data: { jobId: job.id, type: 'spin', path: spinGifPath, status: 'done' }
+            });
+            console.log('360 spin contact sheet saved at:', spinGifPath);
           } catch (err) {
-            console.error('Failed to run turntable GIF compilation script:', err);
+            // Compilation failed — save first frame as spin asset instead
+            console.warn('Contact sheet compilation failed, saving first spin frame as spin asset:', err);
+            const firstFrame = spinResults[0];
+            await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'spin' } });
+            await prisma.asset.create({
+              data: { jobId: job.id, type: 'spin', path: firstFrame.filePath, status: 'done' }
+            });
           }
+
+          // Save individual spin frames as 'spin-frame' assets for the interactive viewer
+          await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'spin-frame' } });
+          for (const frame of spinResults) {
+            await prisma.asset.create({
+              data: { jobId: job.id, type: 'spin-frame', path: frame.filePath, status: 'done' }
+            });
+          }
+
+          // Also save a JSON manifest of all spin frames for the frontend
+          const manifestPath = path.join(jobAssetDir, `${safePrefix}_360_manifest.json`);
+          await writeFile(manifestPath, JSON.stringify({
+            frames: spinResults.map(r => ({ angle: r.angle, file: path.basename(r.filePath) })),
+            total: spinResults.length,
+          }, null, 2));
         }
       }
 
-      // 3. Background removal and social crops
+      // ── 5. Background removal and social crops (via process.py) ──────────────
       const processScript = path.join(process.cwd(), '..', 'worker', 'python', 'process.py');
       const processedDir = path.join(jobAssetDir, 'processed');
-      
+
       const processArgs = [
         processScript,
         '--inputDir', jobAssetDir,
@@ -518,22 +727,22 @@ export async function POST(req: NextRequest) {
 
       try {
         console.log('Running process.py for background removal and social crops...');
-        const { exitCode, stderr } = await runPythonScript(processArgs);
+        const { exitCode, stderr } = await runScript(processArgs);
         if (exitCode === 0) {
           console.log('process.py finished successfully');
-          if (require('fs').existsSync(processedDir)) {
+          if (existsSync(processedDir)) {
             const files = require('fs').readdirSync(processedDir);
             for (const file of files) {
               if (file.endsWith('.png')) {
                 const filePath = path.join(processedDir, file);
                 const isCrop = file.includes('_instagram') || file.includes('_banner') || file.includes('_story');
                 const assetType = isCrop ? 'crop' : 'processed';
-                
+
                 await prisma.asset.deleteMany({
                   where: { jobId: job.id, type: assetType, path: filePath }
                 });
                 await prisma.asset.create({
-                  data: { jobId: job.id, type: assetType, path: filePath, status: 'approved' } // Auto-approve post-processed assets
+                  data: { jobId: job.id, type: assetType, path: filePath, status: 'approved' }
                 });
               }
             }

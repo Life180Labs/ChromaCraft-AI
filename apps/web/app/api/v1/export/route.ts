@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
 
     const approvedAssets = job.assets.filter(
-      a => ['processed', 'variant', 'grid', 'video', 'crop', 'lifestyle'].includes(a.type) &&
+      a => ['processed', 'variant', 'grid', 'video', 'crop', 'lifestyle', 'spin'].includes(a.type) &&
            ['approved', 'done', 'pending'].includes(a.status)
     );
     if (approvedAssets.length === 0) {
@@ -145,7 +145,8 @@ export async function GET(req: NextRequest) {
     // 5. Add 360 spin assets to "360 spin" folder
     if (existsSync(jobDir)) {
       const spinFiles = readdirSync(jobDir).filter(
-        f => (f.includes('360') || f.includes('spin')) && (f.endsWith('.png') || f.endsWith('.gif'))
+        f => (f.includes('360') || f.includes('spin') || f.includes('turntable')) &&
+             (f.endsWith('.png') || f.endsWith('.gif'))
       );
       for (const file of spinFiles) {
         archive.file(path.join(jobDir, file), { name: `360 spin/${file}` });

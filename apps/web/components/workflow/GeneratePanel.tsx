@@ -113,6 +113,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         colors: configuredColors,
         imageModel,
         videoModel,
+        // Ensure videoPrompt is always explicitly included
+        videoPrompt: metadata.videoPrompt || 'Cinematic showcase of the product under dynamic studio lighting',
       };
 
       const res = await fetch('/api/v1/generate-direct', {
@@ -143,10 +145,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         if (updatedJob) onSelectJob(updatedJob);
       }
 
-      setGenSuccess(`✓ Generated ${data.generated}/${data.total} color variants`);
+      setGenSuccess(`✓ Generated ${data.generated}/${data.total} color variants. Review your results in the Review tab.`);
       if (data.failed?.length > 0) {
         setGenError(`${data.failed.length} color(s) failed: ${data.failed.map((f: any) => f.color).join(', ')}`);
       }
+      // Auto-navigate to review tab after successful generation
+      onNavigate?.('review');
       onStartGeneration();
     } catch (err: any) {
       clearInterval(animInterval);

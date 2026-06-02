@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   TbCheck, TbX, TbArrowRight, TbPhoto, TbVideo, TbLoader,
-  TbDownload, TbInfoCircle, TbGrid3X3, TbChevronRight,
+  TbDownload, TbInfoCircle, TbGrid3X3, TbChevronRight, TbRefresh,
 } from 'react-icons/tb';
 import { Button } from '../ui/Button';
+import { InteractiveSpin } from './InteractiveSpin';
 import type { Job, TabId } from '../shared/types';
 
 type ReviewQAProps = {
@@ -50,11 +51,12 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({
   const videoAsset = selectedJob?.assets?.find(a => a.type === 'video');
   const gridAsset = selectedJob?.assets?.find(a => a.type === 'grid');
   const spinAsset = selectedJob?.assets?.find(a => a.type === 'spin');
+  const spinFrameAssets = selectedJob?.assets?.filter(a => a.type === 'spin-frame') || [];
 
   const approvedCount = variantAssets.filter(a => a.status === 'approved').length;
   const rejectedCount = variantAssets.filter(a => a.status === 'rejected').length;
   const pendingCount = variantAssets.length - approvedCount - rejectedCount;
-  const allReviewable = variantAssets.length > 0;
+  const allReviewable = variantAssets.length > 0 || !!videoAsset || !!gridAsset || !!spinAsset || spinFrameAssets.length > 0;
   const anyApproved = approvedCount > 0 || 
     (videoAsset?.status === 'approved') || 
     (gridAsset?.status === 'approved') ||
@@ -127,7 +129,7 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({
         </div>
       )}
 
-      {selectedJob && variantAssets.length === 0 && (
+      {selectedJob && variantAssets.length === 0 && !gridAsset && !videoAsset && !spinAsset && spinFrameAssets.length === 0 && (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <TbLoader className="spin" size={28} style={{ color: 'var(--acc)', margin: '0 auto 12px', display: 'block' }} />
           <p style={{ color: 'var(--tx2)' }}>
@@ -142,7 +144,7 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({
         </div>
       )}
 
-      {selectedJob && variantAssets.length > 0 && (
+      {selectedJob && (variantAssets.length > 0 || gridAsset || videoAsset || spinAsset || spinFrameAssets.length > 0) && (
         <div style={{ display: 'grid', gridTemplateColumns: selectedAssetId ? '1fr 340px' : '1fr', gap: 20 }}>
 
           {/* ─── Grid of color variants ─────────────────── */}
@@ -269,74 +271,99 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({
             )}
 
             {/* Section: Video (if exists) */}
-            {videoAsset && (
-              <div className="card" style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, borderBottom: '1px solid var(--bd)', paddingBottom: 8 }}>
-                  <TbVideo size={14} style={{ color: 'var(--acc)' }} />
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>Showcase Video</span>
-                  <span className={`badge ${videoAsset.status === 'approved' ? 'b-green' : videoAsset.status === 'rejected' ? 'b-red' : 'b-gray'}`} style={{ marginLeft: 'auto' }}>
-                    {videoAsset.status === 'approved' ? 'Approved' : videoAsset.status === 'rejected' ? 'Rejected' : 'Pending'}
-                  </span>
-                </div>
-                <video
-                  src={`/api/v1/assets?id=${videoAsset.id}`}
-                  autoPlay loop muted playsInline
-                  style={{ width: '100%', maxHeight: 300, borderRadius: 6, border: '1px solid var(--bd)', background: '#000' }}
-                />
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <Button
-                    id="approve-video"
-                    variant={videoAsset.status === 'approved' ? 'primary' : 'outline'}
-                    onClick={() => onQAReview(videoAsset.id, 'approved')}
-                  >
-                    <TbCheck size={14} style={{ marginRight: 4 }} /> Approve Video
-                  </Button>
-                  <Button
-                    id="reject-video"
-                    variant="outline"
-                    onClick={() => onQAReview(videoAsset.id, 'rejected')}
-                    style={videoAsset.status === 'rejected' ? { borderColor: 'var(--err)', color: 'var(--err)' } : {}}
-                  >
-                    <TbX size={14} style={{ marginRight: 4 }} /> Reject Video
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Section: 360 Spin Showcase (if exists) */}
-            {spinAsset && (
-              <div className="card" style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, borderBottom: '1px solid var(--bd)', paddingBottom: 8 }}>
-                  <TbPhoto size={14} style={{ color: 'var(--acc)' }} />
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>360° Turntable Spin</span>
-                  <span className={`badge ${spinAsset.status === 'approved' ? 'b-green' : spinAsset.status === 'rejected' ? 'b-red' : 'b-gray'}`} style={{ marginLeft: 'auto' }}>
-                    {spinAsset.status === 'approved' ? 'Approved' : spinAsset.status === 'rejected' ? 'Rejected' : 'Pending'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                  <img
-                    src={`/api/v1/assets?id=${spinAsset.id}`}
-                    alt="360 Turntable"
-                    style={{ width: '100%', maxHeight: 400, borderRadius: 6, border: '1px solid var(--bd)', objectFit: 'contain' }}
-                  />
-                  <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+            {videoAsset && (() => {
+              const isVideoFile = videoAsset.path.endsWith('.mp4') || videoAsset.path.endsWith('.webm') || videoAsset.path.endsWith('.mov');
+              const label = isVideoFile ? 'Showcase Video' : 'Showcase Still (Video Fallback)';
+              return (
+                <div className="card" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, borderBottom: '1px solid var(--bd)', paddingBottom: 8 }}>
+                    <TbVideo size={14} style={{ color: 'var(--acc)' }} />
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
+                    <span className={`badge ${videoAsset.status === 'approved' ? 'b-green' : videoAsset.status === 'rejected' ? 'b-red' : 'b-gray'}`} style={{ marginLeft: 'auto' }}>
+                      {videoAsset.status === 'approved' ? 'Approved' : videoAsset.status === 'rejected' ? 'Rejected' : 'Pending'}
+                    </span>
+                  </div>
+                  {isVideoFile ? (
+                    <video
+                      src={`/api/v1/assets?id=${videoAsset.id}`}
+                      autoPlay loop muted playsInline controls
+                      style={{ width: '100%', maxHeight: 300, borderRadius: 6, border: '1px solid var(--bd)', background: '#000' }}
+                    />
+                  ) : (
+                    <img
+                      src={`/api/v1/assets?id=${videoAsset.id}`}
+                      alt="Showcase Still"
+                      style={{ width: '100%', maxHeight: 300, borderRadius: 6, border: '1px solid var(--bd)', objectFit: 'contain' }}
+                    />
+                  )}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                     <Button
-                      id="approve-spin"
-                      variant={spinAsset.status === 'approved' ? 'primary' : 'outline'}
-                      onClick={() => onQAReview(spinAsset.id, 'approved')}
-                      style={{ flex: 1 }}
+                      id="approve-video"
+                      variant={videoAsset.status === 'approved' ? 'primary' : 'outline'}
+                      onClick={() => onQAReview(videoAsset.id, 'approved')}
                     >
-                      <TbCheck size={14} style={{ marginRight: 4 }} /> Approve Spin
+                      <TbCheck size={14} style={{ marginRight: 4 }} /> Approve {isVideoFile ? 'Video' : 'Still'}
                     </Button>
                     <Button
-                      id="reject-spin"
+                      id="reject-video"
                       variant="outline"
-                      onClick={() => onQAReview(spinAsset.id, 'rejected')}
-                      style={spinAsset.status === 'rejected' ? { flex: 1, borderColor: 'var(--err)', color: 'var(--err)' } : { flex: 1 }}
+                      onClick={() => onQAReview(videoAsset.id, 'rejected')}
+                      style={videoAsset.status === 'rejected' ? { borderColor: 'var(--err)', color: 'var(--err)' } : {}}
                     >
-                      <TbX size={14} style={{ marginRight: 4 }} /> Reject Spin
+                      <TbX size={14} style={{ marginRight: 4 }} /> Reject
                     </Button>
                   </div>
+                </div>
+              );
+            })()}
+
+            {/* Section: 360 Spin Showcase (if exists) */}
+            {(spinAsset || spinFrameAssets.length > 0) && (
+              <div className="card" style={{ padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, borderBottom: '1px solid var(--bd)', paddingBottom: 8 }}>
+                  <TbRefresh size={14} style={{ color: 'var(--acc)' }} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>360° Turntable Spin</span>
+                  {spinFrameAssets.length > 0 && (
+                    <span style={{ fontSize: 10, color: 'var(--tx3)', marginLeft: 4 }}>({spinFrameAssets.length} frames)</span>
+                  )}
+                  {spinAsset && (
+                    <span className={`badge ${spinAsset.status === 'approved' ? 'b-green' : spinAsset.status === 'rejected' ? 'b-red' : 'b-gray'}`} style={{ marginLeft: 'auto' }}>
+                      {spinAsset.status === 'approved' ? 'Approved' : spinAsset.status === 'rejected' ? 'Rejected' : 'Pending'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  {spinFrameAssets.length > 1 ? (
+                    <div style={{ width: '100%', height: 360, border: '1px solid var(--bd)', borderRadius: 6, overflow: 'hidden', background: '#fff' }}>
+                      <InteractiveSpin frameIds={spinFrameAssets.map(a => a.id)} />
+                    </div>
+                  ) : spinAsset ? (
+                    <img
+                      src={`/api/v1/assets?id=${spinAsset.id}`}
+                      alt="360 Turntable"
+                      style={{ width: '100%', maxHeight: 400, borderRadius: 6, border: '1px solid var(--bd)', objectFit: 'contain' }}
+                    />
+                  ) : null}
+                  {spinAsset && (
+                    <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                      <Button
+                        id="approve-spin"
+                        variant={spinAsset.status === 'approved' ? 'primary' : 'outline'}
+                        onClick={() => onQAReview(spinAsset.id, 'approved')}
+                        style={{ flex: 1 }}
+                      >
+                        <TbCheck size={14} style={{ marginRight: 4 }} /> Approve Spin
+                      </Button>
+                      <Button
+                        id="reject-spin"
+                        variant="outline"
+                        onClick={() => onQAReview(spinAsset.id, 'rejected')}
+                        style={spinAsset.status === 'rejected' ? { flex: 1, borderColor: 'var(--err)', color: 'var(--err)' } : { flex: 1 }}
+                      >
+                        <TbX size={14} style={{ marginRight: 4 }} /> Reject Spin
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
