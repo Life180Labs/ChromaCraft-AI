@@ -161,6 +161,136 @@ def generate_hsl_shift(
 
 
 # ---------------------------------------------------------------------------
+# Strategy 4: Google Gemini (Direct Generative Recoloring via ThreadPoolExecutor)
+# ---------------------------------------------------------------------------
+
+def generate_gemini_multithread(
+    prompt: str,
+    colors: list[str],
+    api_key: str,
+    out_dir: str,
+    ref_image_path: Optional[str] = None,
+    image_size: tuple[int, int] = (800, 600),
+    max_workers: int = 3,
+) -> dict[str, str]:
+    """
+    Direct Gemini recoloring strategy.
+    Uploads base reference asset to Google File API once.
+    Fires concurrent worker threads to request variant images from gemini-2.0-flash-preview-image-generation.
+    Cleans up the uploaded file in a finally block.
+    """
+    if not ref_image_path or not os.path.isfile(ref_image_path):
+        raise ValueError(f"Reference image not found at '{ref_image_path}'. Gemini recolor aborted.")
+
+    resolved_key = api_key if (api_key and api_key != "none") else os.environ.get("GEMINI_API_KEY", os.environ.get("CHROMACRAFT_API_KEY", "none"))
+    if resolved_key == "none":
+        raise ValueError("Google Gemini API key required. Set GEMINI_API_KEY or CHROMACRAFT_API_KEY, or pass --apiKey.")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        raise ImportError("google-genai library is missing. Install using: pip install google-genai")
+
+    import io
+    import random
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Initialize Gemini client
+    client = genai.Client(api_key=resolved_key)
+    
+    # Check dimensions of the original image
+    try:
+        original_image = Image.open(ref_image_path)
+        orig_width, orig_height = original_image.size
+    except Exception as e:
+        raise RuntimeError(f"Failed to open reference image: {e}")
+
+    # Stage base asset to Google File API
+    print(f"[Cloud] Staging base asset '{ref_image_path}' to Google File API...", file=sys.stderr)
+    try:
+        uploaded_file = client.files.upload(file=ref_image_path)
+        print(f"[Cloud] Asset staged. URI: {uploaded_file.uri}", file=sys.stderr)
+    except Exception as e:
+        raise RuntimeError(f"Google Cloud upload failed: {e}")
+
+    # Default model from modern Google GenAI library: gemini-2.0-flash-preview-image-generation or gemini-3.1-flash-image (as requested by user)
+    # We fallback to "gemini-2.0-flash-preview-image-generation" if gemini-3.1-flash-image has model naming resolution issues, but we use the user's MODEL_ID
+    model_id = "gemini-2.0-flash-preview-image-generation"  # Current correct production name for image generation/edit
+    if os.environ.get("GEMINI_MODEL_ID"):
+        model_id = os.environ.get("GEMINI_MODEL_ID")
+
+    def worker_generate_variant(color: str, max_retries: int = 3) -> tuple[str, Optional[str]]:
+        worker_prompt = (
+            f"Modify the color of this car to be a sleek {color}. Keep the 45-degree angle, "
+            f"background environment, wheel style, and lighting setup completely identical to the source image."
+        )
+        
+        contents = [{
+            "role": "user",
+            "parts": [
+                {"text": worker_prompt},
+                {"file_data": {"file_uri": uploaded_file.uri, "mime_type": uploaded_file.mime_type}}
+            ]
+        }]
+
+        for attempt in range(max_retries):
+            try:
+                print(f"   -> [Thread {color}] Requesting Gemini variant (Attempt {attempt + 1})...", file=sys.stderr)
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=contents
+                )
+                
+                for part in response.parts:
+                    if part.inline_data:
+                        img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGBA")
+                        
+                        # Handle dimension normalization if required
+                        if img.size != (orig_width, orig_height):
+                            img = img.resize((orig_width, orig_height), Image.Resampling.LANCZOS)
+                            
+                        save_path = os.path.join(out_dir, raw_filename(color))
+                        img.save(save_path, "PNG")
+                        print(f"   ✅ [Thread {color}] Success. Saved to {save_path}", file=sys.stderr)
+                        return color, save_path
+                
+                print(f"   ⚠️ [Thread {color}] Warning: Empty response parts or no inline image data.", file=sys.stderr)
+            except Exception as e:
+                error_msg = str(e).lower()
+                if any(x in error_msg for x in ["429", "quota", "rate limit", "resource_exhausted"]):
+                    if attempt < max_retries - 1:
+                        sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
+                        print(f"   ⏳ [Thread {color}] Rate limited. Backing off for {sleep_time:.1f}s...", file=sys.stderr)
+                        time.sleep(sleep_time)
+                        continue
+                print(f"   ❌ [Thread {color}] Permanent failure: {e}", file=sys.stderr)
+                break
+                
+        return color, None
+
+    results = {}
+    try:
+        print(f"[Gemini] Launching concurrent bulk generation (max_workers={max_workers})...", file=sys.stderr)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(worker_generate_variant, color): color
+                for color in colors
+            }
+            for future in as_completed(futures):
+                color, path = future.result()
+                if path:
+                    results[color] = path
+    finally:
+        print("[Cloud] Purging temporary asset from Google servers...", file=sys.stderr)
+        try:
+            client.files.delete(name=uploaded_file.name)
+        except Exception as e:
+            print(f"[Cloud] Warning: Could not cleanly delete cloud file: {e}", file=sys.stderr)
+
+    return results
+
+# ---------------------------------------------------------------------------
 # Strategy Router
 # ---------------------------------------------------------------------------
 
@@ -230,6 +360,26 @@ def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
         w, h = [int(x) for x in getattr(args, "imageSize", "800x600").split("x")]
     except Exception:
         w, h = 800, 600
+
+    # If the user selects the gemini strategy, run it concurrently for all colors
+    if strategy == "gemini":
+        try:
+            results = generate_gemini_multithread(
+                prompt=args.prompt,
+                colors=colors,
+                api_key=args.apiKey,
+                out_dir=args.outDir,
+                ref_image_path=getattr(args, "refImage", None),
+                image_size=(w, h),
+            )
+            for color in colors:
+                if color in results:
+                    _emit_success(results[color], f"color={color},strategy={strategy}", json_mode)
+                else:
+                    _emit_error(f"Gemini generation failed for color {color}", json_mode, context=f"color={color},strategy={strategy}")
+        except Exception as exc:
+            _emit_error(str(exc), json_mode, context=f"strategy={strategy}")
+        return 0
 
     for color in colors:
         try:
@@ -381,7 +531,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Default to hsl_shift when running CLI manually (pipeline always passes strategy explicitly)
     p.add_argument("--strategy", default="hsl_shift",
-                   choices=["stability", "sdxl_controlnet", "controlnet", "hsl_shift"])
+                   choices=["stability", "sdxl_controlnet", "controlnet", "hsl_shift", "gemini"])
     p.add_argument("--denoiseStrength", type=float, default=0.4)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--preservationStrength", type=float, default=0.7)

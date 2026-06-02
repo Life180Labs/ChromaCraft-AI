@@ -395,6 +395,9 @@ export async function generateCollaterals(
   }
 
   // 360 spin via Python multiview
+  let spinFrameDir = params.outDir;
+  let spinProduced = false;
+
   if (params.settings?.spinEnabled !== false && params.refImagePath) {
     try {
       const multiviewScript = path.join(scriptDir, 'multiview.py');
@@ -407,8 +410,13 @@ export async function generateCollaterals(
       const result = await runProcess('python', spinArgs, {
         env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
       });
+
+      // Always log stderr so failures are visible in worker logs
+      if (result.stderr?.trim()) {
+        logger.info({ jobId, stage: 'spin360', stderr: result.stderr.slice(0, 2000) }, '360 spin stderr');
+      }
+
       if (result.exitCode === 0) {
-        logger.info({ jobId }, '360 spin generated');
         const lines = result.stdout.trim().split('\n');
         let spinResult: any = null;
         for (let i = lines.length - 1; i >= 0; i--) {
@@ -416,52 +424,91 @@ export async function generateCollaterals(
             try { spinResult = JSON.parse(lines[i]); break; } catch { }
           }
         }
-        if (spinResult && spinResult.paths) {
-          const angles = ["front", "front_right", "right", "back_right", "back", "back_left", "left", "front_left", "top"];
+        if (spinResult?.paths) {
+          const angles = ['front', 'front_right', 'right', 'back_right', 'back', 'back_left', 'left', 'front_left', 'top'];
           for (const angle of angles) {
             const spinPath = spinResult.paths[angle];
-            if (spinPath) {
+            if (spinPath && fs.existsSync(spinPath)) {
+              spinProduced = true;
               await prisma.asset.create({ data: { jobId, type: 'spin_frame', path: spinPath, status: 'done' } });
             }
           }
+          logger.info({ jobId, spinProduced }, '360 spin complete');
+        } else {
+          logger.warn({ jobId, stdout: result.stdout.slice(0, 500) }, '360 spin: no paths in output');
         }
       } else {
-        logger.warn({ jobId, stderr: result.stderr }, '360 spin generation returned non-zero exit code');
+        logger.warn({ jobId, exitCode: result.exitCode, stderr: result.stderr.slice(0, 1000) }, '360 spin generation returned non-zero exit code');
       }
     } catch (err: any) {
       logger.warn({ jobId, err: err.message }, '360 spin generation failed');
     }
   }
 
-  // Video generation via Python
+  // Video generation via Python — only runs AFTER spin completes and frames exist on disk
   if (params.settings?.videoEnabled !== false) {
-    try {
-      const videoScript = path.join(scriptDir, 'video.py');
-      const videoPath = path.join(params.outDir, `${prefix}_showcase.mp4`);
+    // Verify frames actually exist before invoking video.py
+    const spinFrameFiles = fs.existsSync(spinFrameDir)
+      ? fs.readdirSync(spinFrameDir).filter((f) => f.startsWith(`${prefix}_360_`) && f.endsWith('.png'))
+      : [];
 
-      const videoArgs = [
-        videoScript, '--task', 'showcase', '--framesDir', params.outDir,
-        '--output', videoPath, '--prefix', prefix, '--jsonMode',
-      ];
+    if (spinFrameFiles.length === 0 && !params.refImagePath) {
+      logger.info({ jobId }, 'Video skipped: no 360 frames and no refImage');
+    } else {
+      try {
+        const videoScript = path.join(scriptDir, 'video.py');
+        const videoPath = path.join(params.outDir, `${prefix}_showcase.mp4`);
 
-      const result = await runProcess('python', videoArgs, {
-        env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
-      });
-      if (result.exitCode === 0 && fs.existsSync(videoPath)) {
-        await prisma.asset.create({ data: { jobId, type: 'video', path: videoPath, status: 'done' } });
-        logger.info({ jobId }, 'Video generated');
-      } else {
-        logger.warn({ jobId, stderr: result.stderr }, 'Video generation returned non-zero exit code');
+        let videoArgs: string[];
+        if (spinFrameFiles.length > 0) {
+          // Preferred: build showcase from 360 frames
+          videoArgs = [
+            videoScript, '--task', 'showcase', '--framesDir', spinFrameDir,
+            '--output', videoPath, '--prefix', prefix, '--jsonMode',
+          ];
+        } else {
+          // Fallback: simple Ken-Burns zoom from refImage
+          videoArgs = [
+            videoScript, '--task', 'simple',
+            '--refImage', params.refImagePath!,
+            '--output', videoPath, '--jsonMode',
+          ];
+        }
+
+        logger.info({ jobId, task: spinFrameFiles.length > 0 ? 'showcase' : 'simple', frames: spinFrameFiles.length }, 'Starting video generation');
+
+        const result = await runProcess('python', videoArgs, {
+          env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none' },
+        });
+
+        if (result.stderr?.trim()) {
+          logger.info({ jobId, stage: 'video', stderr: result.stderr.slice(0, 2000) }, 'Video stderr');
+        }
+
+        if (result.exitCode === 0 && fs.existsSync(videoPath)) {
+          await prisma.asset.create({ data: { jobId, type: 'video', path: videoPath, status: 'done' } });
+          logger.info({ jobId, videoPath }, 'Video generated successfully');
+        } else {
+          logger.warn({ jobId, exitCode: result.exitCode, stderr: result.stderr.slice(0, 1000) }, 'Video generation returned non-zero exit code or output missing');
+        }
+      } catch (err: any) {
+        logger.warn({ jobId, err: err.message }, 'Video generation failed');
       }
-    } catch (err: any) {
-      logger.warn({ jobId, err: err.message }, 'Video generation failed');
     }
   }
 }
 
-export async function runProcess(command: string, args: string[], opts?: { env?: Record<string, string | undefined> }): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+export async function runProcess(
+  command: string,
+  args: string[],
+  opts?: { env?: Record<string, string | undefined>; cwd?: string; timeout?: number }
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { timeout: 180000, env: opts?.env ?? process.env });
+    const child = spawn(command, args, {
+      timeout: opts?.timeout ?? 600000,   // 10 minutes default
+      env: opts?.env ?? process.env,
+      cwd: opts?.cwd,
+    });
     let stdout = '', stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
