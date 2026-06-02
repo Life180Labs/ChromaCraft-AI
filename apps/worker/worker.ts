@@ -205,9 +205,14 @@ const processingWorker = new Worker('processing', async (job: BullJob<Processing
 
     const refAsset = await prisma.asset.findFirst({ where: { jobId, type: 'original' } });
 
+    const dbJob = await prisma.job.findUnique({ where: { id: jobId }, include: { generation: true } });
+    const metadata = dbJob?.generation?.metadata as any;
+    const cropsEnabled = metadata?.cropsEnabled === true;
+
     const { exitCode, stderr } = await runPythonScript('process.py', [
       '--inputDir', jobAssetDir, '--outputDir', processedDir, '--prefix', prefix,
       ...(refAsset?.path ? ['--refImage', refAsset.path] : []),
+      ...(cropsEnabled ? ['--socialCrops'] : []),
       '--jsonMode',
     ]);
     if (exitCode !== 0) throw new Error(`process.py failed (exit ${exitCode}): ${stderr}`);

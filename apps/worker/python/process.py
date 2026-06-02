@@ -106,6 +106,54 @@ def extract_mask(input_path: str, output_path: str) -> None:
     logger.info("Saved mask: %s", output_path)
 
 
+def create_social_crops(image_path: str, output_dir: str, prefix: str, color_slug: str) -> None:
+    img = Image.open(image_path)
+    w, h = img.size
+    
+    # 1. Instagram 1:1 crop
+    sq_size = min(w, h)
+    left = (w - sq_size) // 2
+    top = (h - sq_size) // 2
+    right = left + sq_size
+    bottom = top + sq_size
+    img_1_1 = img.crop((left, top, right, bottom))
+    img_1_1.save(os.path.join(output_dir, f"{prefix}_{color_slug}_instagram.png"), "PNG")
+    logger.info("Saved Instagram crop: %s", os.path.join(output_dir, f"{prefix}_{color_slug}_instagram.png"))
+    
+    # 2. X/Blog 16:9 crop
+    target_aspect = 16.0 / 9.0
+    current_aspect = w / h
+    if current_aspect > target_aspect:
+        new_w = int(h * target_aspect)
+        left = (w - new_w) // 2
+        right = left + new_w
+        crop_box = (left, 0, right, h)
+    else:
+        new_h = int(w / target_aspect)
+        top = (h - new_h) // 2
+        bottom = top + new_h
+        crop_box = (0, top, w, bottom)
+    img_16_9 = img.crop(crop_box)
+    img_16_9.save(os.path.join(output_dir, f"{prefix}_{color_slug}_banner.png"), "PNG")
+    logger.info("Saved X/Blog banner crop: %s", os.path.join(output_dir, f"{prefix}_{color_slug}_banner.png"))
+
+    # 3. Stories 9:16 crop
+    target_aspect_vert = 9.0 / 16.0
+    if current_aspect > target_aspect_vert:
+        new_w = int(h * target_aspect_vert)
+        left = (w - new_w) // 2
+        right = left + new_w
+        crop_box = (left, 0, right, h)
+    else:
+        new_h = int(w / target_aspect_vert)
+        top = (h - new_h) // 2
+        bottom = top + new_h
+        crop_box = (0, top, w, bottom)
+    img_9_16 = img.crop(crop_box)
+    img_9_16.save(os.path.join(output_dir, f"{prefix}_{color_slug}_story.png"), "PNG")
+    logger.info("Saved Story crop: %s", os.path.join(output_dir, f"{prefix}_{color_slug}_story.png"))
+
+
 # ---------------------------------------------------------------------------
 # CLI Entry Point
 # ---------------------------------------------------------------------------
@@ -120,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--highRes", action="store_true", help="Output at 2048x1536 instead of 800x600")
     p.add_argument("--noBackgroundRemoval", action="store_true", help="Skip background removal")
     p.add_argument("--noIdentityLock", action="store_true", help="Skip identity lock")
+    p.add_argument("--socialCrops", action="store_true", help="Generate social media crops (1:1, 16:9, 9:16)")
     p.add_argument("--jsonMode", action="store_true", help="Output JSON for orchestrator consumption")
     return p
 
@@ -177,6 +226,9 @@ def main() -> int:
                 identity_lock=not args.noIdentityLock,
             )
             results.append({"input": filename, "output": output_path, "status": "done"})
+            
+            if args.socialCrops:
+                create_social_crops(output_path, args.outputDir, args.prefix, color_slug)
         except Exception as exc:
             failures += 1
             results.append({"input": filename, "output": None, "status": "error", "error": str(exc)})

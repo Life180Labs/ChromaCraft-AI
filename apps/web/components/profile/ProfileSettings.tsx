@@ -34,6 +34,12 @@ const PROVIDER_KEY_CONFIGS: ProviderKeyConfig[] = [
     placeholder: 'gsk-...',
   },
   {
+    name: 'gemini',
+    label: 'Google Gemini',
+    description: 'Google Gemini Image Generation API (used for concurrent generation)',
+    placeholder: 'AIzaSy...',
+  },
+  {
     name: 'mock',
     label: 'Mock provider',
     description: 'Local placeholders — no API key required',

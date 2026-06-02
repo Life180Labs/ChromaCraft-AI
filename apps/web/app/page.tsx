@@ -89,9 +89,27 @@ export default function Home() {
 
   // Update promptText dynamically when setup parameters change
   useEffect(() => {
-    const prompt = `Generate a photorealistic [${modelName || 'Mitsubishi ASX'}] in [COLOR] paint.\nAudience: ${targetAudience.toLowerCase()} · ${targetMarket.toLowerCase()} market.\nUse: ${targetPurpose.toLowerCase()}.\nView: front-right three-quarter. Drive: LHD.\nPlate: white, blank. Background: pure white. No overlap.`;
+    const getIndustryDescription = (ind: string) => {
+      switch (ind) {
+        case 'Automotive': return 'vehicle (car/SUV/truck)';
+        case '2-Wheeler': return '2-wheeler (bike/motorcycle/scooty/e-moped)';
+        case 'Apparel': return 'clothing/apparel/jewelry/garment';
+        case 'Footwear': return 'footwear (shoes/sneakers/formal/athletic)';
+        case 'Electronics': return 'electronic device (laptop/smartphone)';
+        case 'Furniture': return 'furniture (table/chair/sofa/decor)';
+        default: return 'product';
+      }
+    };
+    
+    const industryDesc = getIndustryDescription(industry);
+    const audienceDesc = targetAudience ? `Targeting: ${targetAudience.toLowerCase()} in ${targetMarket.toLowerCase()} market` : '';
+    const purposeDesc = targetPurpose ? `Purpose: ${targetPurpose.toLowerCase()}` : '';
+    const contextDesc = additionalContext ? `Context: ${additionalContext.trim()}` : '';
+
+    const prompt = `Generate an identity-preserved catalog image of the ${industryDesc} [${modelName || 'Product'}] in [COLOR] color.
+${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : ''}${contextDesc ? contextDesc + '\n' : ''}CRITICAL: Keep the product shape, geometry, proportions, camera angle, and structural details completely identical to the source image. Change only the color/texture to [COLOR].`;
     setPromptText(prompt);
-  }, [modelName, targetAudience, targetMarket, targetPurpose]);
+  }, [industry, modelName, targetAudience, targetMarket, targetPurpose, additionalContext]);
 
   // Polling effect for active job status during generation
   useEffect(() => {

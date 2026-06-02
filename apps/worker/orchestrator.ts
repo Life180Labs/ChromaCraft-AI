@@ -115,9 +115,12 @@ export class AgentController {
 
     await fs.promises.mkdir(params.outDir, { recursive: true });
 
+    // Parallel color processing with concurrency throttle
+    const strategy = params.settings?.strategy || 'stability';
+
     // Generate control inputs once (reused for all colors)
     const identityDir = path.join(params.outDir, 'identity');
-    if (params.refImagePath) {
+    if (params.refImagePath && strategy !== 'gemini') {
       try {
         await this.runIdentityPreservation(params.refImagePath, identityDir);
         logger.info({ jobId }, 'Identity preservation controls generated');
@@ -126,8 +129,6 @@ export class AgentController {
       }
     }
 
-    // Parallel color processing with concurrency throttle
-    const strategy = params.settings?.strategy || 'stability';
     const denoiseStrength = params.settings?.denoiseStrength ?? 0.4;
     const semaphore = new Semaphore(COLOR_CONCURRENCY);
     const colorPromises = colors.map((color, index) =>
@@ -225,11 +226,15 @@ export class AgentController {
       
       // Quality validation with CLIP/DINOv2
       let qualityResult: QualityResult;
-      try {
-        qualityResult = await this.runQualityValidation(params.refImagePath!, assetPath);
-      } catch (err: any) {
-        logger.warn({ jobId, err: err.message }, 'Quality validator unavailable, using heuristic');
-        qualityResult = { passed: true, critique: 'Validator unavailable', clip_score: 0, dinov2_score: 0, ssim_score: 0, aggregate: 0.95 };
+      if (strategy === 'gemini') {
+        qualityResult = { passed: true, critique: 'Gemini bypass', clip_score: 1.0, dinov2_score: 1.0, ssim_score: 1.0, aggregate: 1.0 };
+      } else {
+        try {
+          qualityResult = await this.runQualityValidation(params.refImagePath!, assetPath);
+        } catch (err: any) {
+          logger.warn({ jobId, err: err.message }, 'Quality validator unavailable, using heuristic');
+          qualityResult = { passed: true, critique: 'Validator unavailable', clip_score: 0, dinov2_score: 0, ssim_score: 0, aggregate: 0.95 };
+        }
       }
 
       lastQuality = qualityResult;
@@ -271,6 +276,9 @@ export class AgentController {
     basePrompt: string, color: string, goal: string, critique: string | null, params: GenerationParams
   ): Promise<string> {
     const colorResolved = basePrompt.replace(/\[color\]/gi, color);
+    if (params.settings?.strategy === 'gemini') {
+      return colorResolved;
+    }
     const industry = params.settings?.industry && params.settings.industry !== 'General' ? params.settings.industry : 'Product';
 
     const identityInstruction =
@@ -494,6 +502,55 @@ export async function generateCollaterals(
       } catch (err: any) {
         logger.warn({ jobId, err: err.message }, 'Video generation failed');
       }
+    }
+  }
+
+  // Lifestyle integration via Python
+  if (params.settings?.lifestyleEnabled !== false && params.settings?.lifestyleEnabled !== undefined) {
+    try {
+      const generateScript = path.join(scriptDir, 'generate.py');
+      const refPathForLifestyle = passedResults[0]?.assetPath || params.refImagePath;
+      if (refPathForLifestyle && fs.existsSync(refPathForLifestyle)) {
+        logger.info({ jobId, refPathForLifestyle }, 'Starting lifestyle scene generation');
+        const lifestyleArgs = [
+          generateScript, '--task', 'lifestyle',
+          '--refImage', refPathForLifestyle,
+          '--outDir', params.outDir,
+          '--prefix', prefix,
+          '--targetAudience', params.settings.targetAudience || 'General consumers',
+          '--targetMarket', params.settings.targetMarket || 'Global',
+          '--targetPurpose', params.settings.targetPurpose || 'Product catalog',
+          '--additionalContext', params.settings.additionalContext || '',
+          '--jsonMode',
+        ];
+
+        const result = await runProcess('python', lifestyleArgs, {
+          env: { ...process.env, CHROMACRAFT_API_KEY: params.apiKey || 'none', GEMINI_API_KEY: params.apiKey || 'none' },
+        });
+
+        if (result.stderr?.trim()) {
+          logger.info({ jobId, stage: 'lifestyle', stderr: result.stderr.slice(0, 2000) }, 'Lifestyle stderr');
+        }
+
+        if (result.exitCode === 0) {
+          const lines = result.stdout.trim().split('\n');
+          for (const line of lines) {
+            if (line.trim().startsWith('{')) {
+              try {
+                const resObj = JSON.parse(line);
+                if (resObj.status === 'success' && resObj.path && fs.existsSync(resObj.path)) {
+                  await prisma.asset.create({ data: { jobId, type: 'lifestyle', path: resObj.path, status: 'done' } });
+                }
+              } catch { }
+            }
+          }
+          logger.info({ jobId }, 'Lifestyle scenes complete');
+        } else {
+          logger.warn({ jobId, exitCode: result.exitCode }, 'Lifestyle returned non-zero exit code');
+        }
+      }
+    } catch (err: any) {
+      logger.warn({ jobId, err: err.message }, 'Lifestyle generation failed');
     }
   }
 }

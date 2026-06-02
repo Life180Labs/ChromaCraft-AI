@@ -213,10 +213,7 @@ def generate_gemini_multithread(
         model_id = os.environ.get("GEMINI_MODEL_ID")
 
     def worker_generate_variant(color: str, max_retries: int = 3) -> tuple[str, Optional[str]]:
-        worker_prompt = (
-            f"Modify the color of this car to be a sleek {color}. Keep the 45-degree angle, "
-            f"background environment, wheel style, and lighting setup completely identical to the source image."
-        )
+        worker_prompt = prompt.replace("[COLOR]", color).replace("[color]", color) if prompt else f"Modify the color to be {color}. Keep all other details identical."
         
         contents = [{
             "role": "user",
@@ -352,6 +349,17 @@ def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
         w, h = [int(x) for x in getattr(args, "imageSize", "800x600").split("x")]
     except Exception:
         w, h = 800, 600
+
+    if provider == "mock":
+        for color in colors:
+            out_path = os.path.join(args.outDir, raw_filename(color))
+            try:
+                img = Image.new("RGBA", (w, h), color.lower().replace(" ", "").replace("_", ""))
+            except Exception:
+                img = Image.new("RGBA", (w, h), "gray")
+            img.save(out_path, "PNG")
+            _emit_success(out_path, f"color={color},strategy={strategy}", json_mode)
+        return 0
 
     # If the user selects the gemini strategy, run it concurrently for all colors
     if strategy == "gemini":
@@ -501,13 +509,128 @@ def _emit_error(reason: str, json_mode: bool, context: str = "") -> None:
         print(f"[ERR] {reason}" + (f" ({context})" if context else ""), file=sys.stderr)
 
 
+def generate_lifestyle_scenes(
+    ref_image_path: str,
+    target_audience: str,
+    target_market: str,
+    target_purpose: str,
+    additional_context: str,
+    api_key: str,
+    out_dir: str,
+    prefix: str,
+) -> list[str]:
+    """
+    Generate 3 lifestyle/scenery images based on targeting context.
+    Uses Google Gemini to edit/generate a scene around the product.
+    """
+    try:
+        from google import genai
+    except ImportError:
+        print("[ERR] google-genai library missing, cannot run lifestyle generation", file=sys.stderr)
+        return []
+
+    import io
+    client = genai.Client(api_key=api_key)
+    
+    # Upload reference image
+    print(f"[Lifestyle] Staging reference asset '{ref_image_path}' to Google File API...", file=sys.stderr)
+    try:
+        uploaded_file = client.files.upload(file=ref_image_path)
+    except Exception as e:
+        print(f"[Lifestyle] Google Cloud upload failed: {e}", file=sys.stderr)
+        return []
+    
+    model_id = "gemini-2.0-flash-preview-image-generation"
+    if os.environ.get("GEMINI_MODEL_ID"):
+        model_id = os.environ.get("GEMINI_MODEL_ID")
+
+    scenes = [
+        "Render the product placed naturally in a premium minimalist modern showcase setting.",
+        "Render the product placed naturally in a dynamic urban city environment during golden hour.",
+        "Render the product placed naturally in a professional outdoor lifestyle setting matching the target audience."
+    ]
+    
+    output_paths = []
+    for i, scene_base in enumerate(scenes):
+        prompt = (
+            f"{scene_base} The target audience is {target_audience} in the {target_market} market. "
+            f"The purpose is {target_purpose}. {additional_context or ''} "
+            f"Ensure the product from the source image remains completely unchanged and is integrated naturally into the background."
+        )
+        
+        contents = [{
+            "role": "user",
+            "parts": [
+                {"text": prompt},
+                {"file_data": {"file_uri": uploaded_file.uri, "mime_type": uploaded_file.mime_type}}
+            ]
+        }]
+        
+        try:
+            print(f"[Lifestyle] Requesting scene {i+1}...", file=sys.stderr)
+            response = client.models.generate_content(
+                model=model_id,
+                contents=contents
+            )
+            for part in response.parts:
+                if part.inline_data:
+                    img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGBA")
+                    save_path = os.path.join(out_dir, f"{prefix}_lifestyle_{i+1}.png")
+                    img.save(save_path, "PNG")
+                    output_paths.append(save_path)
+                    print(f"[Lifestyle] Saved scene {i+1} to {save_path}", file=sys.stderr)
+                    break
+        except Exception as e:
+            print(f"[Lifestyle] Failed to generate scene {i+1}: {e}", file=sys.stderr)
+            
+    try:
+        client.files.delete(name=uploaded_file.name)
+    except Exception as e:
+        print(f"[Lifestyle] Warning: Could not cleanly delete cloud file: {e}", file=sys.stderr)
+        
+    return output_paths
+
+
+def task_lifestyle(args: argparse.Namespace, json_mode: bool) -> int:
+    ref = getattr(args, "refImage", None)
+    if not ref or not os.path.isfile(ref):
+        _emit_error("Reference image required for lifestyle generation", json_mode)
+        return 1
+        
+    resolved_key = args.apiKey if (args.apiKey and args.apiKey != "none") else os.environ.get("GEMINI_API_KEY", os.environ.get("CHROMACRAFT_API_KEY", "none"))
+    if resolved_key == "none":
+        _emit_error("API key required for lifestyle generation", json_mode)
+        return 1
+        
+    try:
+        paths = generate_lifestyle_scenes(
+            ref_image_path=ref,
+            target_audience=getattr(args, "targetAudience", "General consumers"),
+            target_market=getattr(args, "targetMarket", "Global"),
+            target_purpose=getattr(args, "targetPurpose", "Product catalog"),
+            additional_context=getattr(args, "additionalContext", ""),
+            api_key=resolved_key,
+            out_dir=args.outDir,
+            prefix=args.prefix,
+        )
+        if not paths:
+            _emit_error("No lifestyle scenes generated", json_mode)
+            return 1
+        for p in paths:
+            _emit_success(p, "type=lifestyle", json_mode)
+        return 0
+    except Exception as exc:
+        _emit_error(str(exc), json_mode)
+        return 1
+
+
 # ---------------------------------------------------------------------------
 # Argument Parser
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="ChromaCraft Image Generation Tool")
-    p.add_argument("--task", choices=["generate", "spin360", "video"], default="generate")
+    p.add_argument("--task", choices=["generate", "spin360", "video", "lifestyle"], default="generate")
     p.add_argument("--jsonMode", action="store_true")
     p.add_argument("--jobId", default="0")
     p.add_argument("--prompt", default="")
@@ -520,6 +643,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prefix", default="product")
     p.add_argument("--inputPath", default=None)
     p.add_argument("--framesDir", default=None)
+    
+    # Lifestyle arguments
+    p.add_argument("--targetAudience", default="General consumers")
+    p.add_argument("--targetMarket", default="Global")
+    p.add_argument("--targetPurpose", default="Product catalog")
+    p.add_argument("--additionalContext", default="")
 
     # Default to hsl_shift when running CLI manually (pipeline always passes strategy explicitly)
     p.add_argument("--strategy", default="hsl_shift",
@@ -536,6 +665,7 @@ def main() -> int:
         "generate": task_generate,
         "spin360": task_spin360,
         "video": task_video,
+        "lifestyle": task_lifestyle,
     }
     return dispatch[args.task](args, args.jsonMode)
 

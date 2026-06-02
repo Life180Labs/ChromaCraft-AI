@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     if (!activeProvider || activeProvider.name.toLowerCase() === 'mock') {
       return NextResponse.json({
-        error: 'No active AI Provider configured. Configure Stability AI in Profile Settings.',
+        error: 'No active AI Provider configured. Configure Stability AI or Google Gemini in Profile Settings.',
       }, { status: 400 });
     }
 
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
       imageSize: settings?.imageSize || '800x600',
       spinFrames: settings?.spinFrames || 36,
       fps: settings?.fps || 12,
-      strategy: (settings as any)?.strategy || 'stability',
+      strategy: (settings as any)?.strategy || (providerName.toLowerCase() === 'gemini' ? 'gemini' : 'stability'),
       denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
       qualityThreshold: (settings as any)?.qualityThreshold ?? 0.92,
       identityLock: (settings as any)?.identityLock !== false,

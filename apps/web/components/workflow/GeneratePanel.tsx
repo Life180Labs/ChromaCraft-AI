@@ -115,6 +115,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 
   const videoAsset = assets.find(a => a.type === 'video');
   const spinFrames = assets.filter(a => a.type === 'spin_frame').sort((a, b) => a.id - b.id);
+  const lifestyleAssets = assets.filter(a => a.type === 'lifestyle');
 
   // ----------------------------------------------------
   // HYBRID GENERATION LOGIC (Puter.js + Backend)
@@ -410,7 +411,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                     {(() => {
                       if (!selectedJob) return '';
                       const baseColor = configuredColors[0] || 'White';
-                      const colorResolved = promptText.replace(/\[color\]/gi, baseColor);
+                      const colorResolved = promptText.replace(/\[color\]/gi, baseColor).replace(/\[COLOR\]/gi, baseColor);
+                      const strat = metadata.strategy || 'stability';
+                      if (strat === 'gemini') {
+                        return colorResolved;
+                      }
                       const ind = metadata.industry && metadata.industry !== 'General' ? metadata.industry : 'Product';
                       const prefixVal = metadata.prefix || String(selectedJob.id);
                       const goal = `Generate an identity-preserved product catalog image with correct color. Maintain exact same shape, geometry, proportions, and structure. Only color changes. Job: "${selectedJob.name}" | Prefix: ${prefixVal} | Industry: ${ind}.`;
@@ -527,13 +532,27 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 </div>
               ) : (
                 <div>
-                  {lifestyleSimStatus === 'waiting' && (
+                  {lifestyleAssets.length > 0 ? (
+                    <div className="lifestyle-preview-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                      {lifestyleAssets.map(asset => (
+                        <div
+                          key={asset.id}
+                          className="lp-card done"
+                          style={{ minHeight: '64px', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '6px', overflow: 'hidden' }}
+                        >
+                          <img
+                            src={`/api/v1/assets?id=${asset.id}`}
+                            alt="Lifestyle Scene"
+                            style={{ maxWidth: '100%', maxHeight: '60px', objectFit: 'contain', borderRadius: '4px' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : lifestyleSimStatus === 'waiting' ? (
                     <div id="life-gen-waiting" style={{ fontSize: '11px', color: 'var(--tx3)', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 0' }}>
                       <TbClock /> Waiting for color grid variants to finish...
                     </div>
-                  )}
-
-                  {lifestyleSimStatus !== 'waiting' && (
+                  ) : (
                     <div className="lifestyle-preview-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                       {lifestyleCards.map(card => (
                         <div

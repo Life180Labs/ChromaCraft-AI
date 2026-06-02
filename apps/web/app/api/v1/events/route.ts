@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
 import { generateEvents, processingEvents } from '../../../../lib/bullmq';
-import { createAdapter } from '@bull-monitor/root';
 
 /**
  * GET /api/v1/events?jobId=123

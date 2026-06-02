@@ -52,21 +52,3 @@ export function initializeSocket(httpServer: HTTPServer) {
 export function getIO(): Server | null {
   return io;
 }
-
-/**
- * SSE endpoint helper for environments without WebSocket support.
- * Usage: GET /api/v1/events?jobId=123
- */
-export function createSSEStream(jobId: number, onData: (data: string) => void): () => void {
-  const handler = (data: any) => {
-    onData(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
-  io?.to(`job:${jobId}`).on('job:progress', handler);
-  io?.to(`job:${jobId}`).on('job:completed', handler);
-  io?.to(`job:${jobId}`).on('job:failed', handler);
-
-  return () => {
-    // cleanup
-  };
-}
