@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { TbCheck, TbX, TbArrowRight } from 'react-icons/tb';
+import { TbCheck, TbX, TbArrowRight, TbInfoCircle } from 'react-icons/tb';
 import { Button } from '../ui/Button';
 import type { Job, TabId } from '../shared/types';
 import { InteractiveSpin } from './InteractiveSpin';
@@ -45,6 +45,67 @@ export const ReviewQA: React.FC<ReviewQAProps> = ({ jobs = [], selectedJob, onSe
             ))}
           </select>
         </div>
+
+        {selectedJob && (() => {
+          const promptContent = selectedJob.prompt?.content || '';
+          const meta = selectedJob.generation?.metadata || {};
+          const colors: string[] = meta.colors || [];
+          const additionalContext = meta.additionalContext || '';
+          return (
+            <div className="card" style={{ padding: '12px', marginBottom: '16px', background: 'var(--bg2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                <TbInfoCircle size={14} style={{ color: 'var(--acc)' }} />
+                <span style={{ fontSize: '12px', fontWeight: 600 }}>Prompt Configuration</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--tx2)', lineHeight: '1.5' }}>
+                <div style={{ marginBottom: '6px' }}>
+                  <strong>Base Prompt:</strong>{' '}
+                  {promptContent || <span style={{ color: 'var(--tx4)' }}>No prompt content</span>}
+                </div>
+                {additionalContext && (
+                  <div style={{ marginBottom: '6px' }}>
+                    <strong>Creative Variations:</strong> {additionalContext}
+                  </div>
+                )}
+                {colors.length > 0 && (
+                  <div style={{ marginBottom: '6px' }}>
+                    <strong>Colors:</strong>{' '}
+                    {colors.map((c: string, i: number) => (
+                      <span key={c}>
+                        {i > 0 && ', '}
+                        <span
+                          style={{
+                            color: qaAssets.find(a => a.path.toLowerCase().includes(c.toLowerCase()))?.status === 'approved'
+                              ? 'var(--suc)' : qaAssets.find(a => a.path.toLowerCase().includes(c.toLowerCase()))?.status === 'rejected'
+                                ? 'var(--err)' : 'var(--tx)'
+                          }}
+                        >
+                          {c}
+                          {qaAssets.find(a => a.path.toLowerCase().includes(c.toLowerCase())) && (
+                            qaAssets.find(a => a.path.toLowerCase().includes(c.toLowerCase()))!.status === 'approved' ? ' ✓' :
+                            qaAssets.find(a => a.path.toLowerCase().includes(c.toLowerCase()))!.status === 'rejected' ? ' ✗' : ''
+                          )}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div>
+                  <strong>Status:</strong>{' '}
+                  <span style={{
+                    color: selectedJob.status === 'COMPLETED' ? 'var(--suc)' :
+                           selectedJob.status === 'FAILED' ? 'var(--err)' : 'var(--tx3)'
+                  }}>
+                    {selectedJob.status}
+                  </span>
+                  <span style={{ marginLeft: '12px' }}>
+                    <strong>Approved:</strong> {qaAssets.filter(a => a.status === 'approved').length}/{qaAssets.length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {!selectedJob && <p style={{ color: 'var(--tx3)' }}>Please select a job first.</p>}
 

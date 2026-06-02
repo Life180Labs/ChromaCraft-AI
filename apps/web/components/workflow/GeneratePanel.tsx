@@ -416,7 +416,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                       const goal = `Generate an identity-preserved product catalog image with correct color. Maintain exact same shape, geometry, proportions, and structure. Only color changes. Job: "${selectedJob.name}" | Prefix: ${prefixVal} | Industry: ${ind}.`;
                       const identityInstruction = 'CRITICAL: The product shape, geometry, proportions, camera angle, reflections, and ALL structural details MUST remain identical to the original.';
                       const customContext = `Render in a ${artStyle} style. The setting is a ${environment}. Use ${lighting}.`;
-                      return `${colorResolved}. ${ind} primary color: ${baseColor}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality. Additional Custom Context: ${customContext}.`;
+                      const orchestratorPrompt = `${colorResolved}. ${ind} primary color: ${baseColor}. Goal: ${goal}. ${identityInstruction} Photorealistic, studio lighting, catalog quality. Additional Custom Context: ${customContext}.`;
+                      return `${orchestratorPrompt} Change the color to ${baseColor}.`;
                     })()}
                   </div>
                 </div>

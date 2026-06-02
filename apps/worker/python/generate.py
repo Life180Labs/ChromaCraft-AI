@@ -53,8 +53,8 @@ def _resolve_api_key(cli_key: str) -> str:
 
 
 def _identity_prompt(color: str, prompt: str) -> str:
-    """Append color change instruction — orchestrator injects identity details separately."""
-    return f"Change the color to {color}."
+    """Append color change to the full prompt from orchestrator (includes identity, context, variations)."""
+    return f"{prompt} Change the color to {color}."
 
 
 # ---------------------------------------------------------------------------
