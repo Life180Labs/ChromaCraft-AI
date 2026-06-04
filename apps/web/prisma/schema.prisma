@@ -41,13 +41,18 @@ enum Role {
 }
 
 // ── Gemini-first generation strategy enum ─────────────────────────────────────
-// Stability AI strategies have been removed. All generation uses Gemini APIs.
+// Stability AI strategies have been removed from code, but kept in enum for DB backwards compatibility.
 enum GenerationStrategy {
   GEMINI_IMAGE_EDIT     // gemini-3-pro-image (color variants)
   GEMINI_LIFESTYLE      // gemini-2.0-flash (lifestyle scene generation)
   VEO_VIDEO             // veo-3.1-generate-preview (product showcase video)
   GEMINI_SPIN           // gemini-2.0-flash (360° spin frames)
   HUE_SHIFT             // Pure local HSL shift (no AI, free, for testing only)
+  // Legacy variants kept to prevent Postgres enum drop errors:
+  STABILITY_SEARCH_REPLACE
+  SDXL_CONTROLNET
+  FLUX_REDUX
+  GPT_IMAGE_EDIT
 }
 
 // ── Models ────────────────────────────────────────────────────────────────────
