@@ -4,8 +4,76 @@ import prisma from '../../../../lib/prisma';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
+import { z } from 'zod';
+import { decryptApiKey } from '../../../../lib/crypto';
+import { veoVideoQueue } from '../../../../lib/bullmq';
+import log, { logGenerationCost, logErrorEvent } from '../../../../lib/logger';
 
-// ─── Gemini image generation helper ─────────────────────────────────────────
+const STORAGE_PATH = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage');
+
+// ── Allowed Gemini model allowlists ──────────────────────────────────────────
+const ALLOWED_IMAGE_MODELS = [
+  'gemini-3.1-flash-image',
+  'gemini-3.1-flash',
+  'gemini-3.1-pro',
+  'gemini-2.0-flash-preview-image-generation',
+  'gemini-2.0-flash-exp-image-generation',
+  'gemini-2.5-flash-preview-05-20',
+  'imagen-3.0-generate-002',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+];
+const ALLOWED_VIDEO_MODELS = [
+  'veo-3.1-generate-001',
+  'veo-3.1-generate-preview',
+  'veo-3.0-generate-001',
+  'veo-3.0-generate-preview',
+  'veo-2.0-generate-001',
+  'veo-2.0-generate-preview',
+];
+
+// ── Input validation schema ───────────────────────────────────────────────────
+const GenerateDirectSettingsSchema = z.object({
+  colors: z.array(z.string().min(1).max(50)).min(1).max(48).optional(),
+  cols: z.number().int().min(1).max(8).optional(),
+  rows: z.number().int().min(1).max(8).optional(),
+  imageModel: z.string().refine(
+    v => ALLOWED_IMAGE_MODELS.includes(v),
+    { message: `imageModel must be one of: ${ALLOWED_IMAGE_MODELS.join(', ')}` }
+  ).optional(),
+  videoModel: z.string().refine(
+    v => ALLOWED_VIDEO_MODELS.includes(v),
+    { message: `videoModel must be one of: ${ALLOWED_VIDEO_MODELS.join(', ')}` }
+  ).optional(),
+  videoEnabled: z.boolean().optional(),
+  videoPrompt: z.string().max(1000).optional(),
+  spinEnabled: z.boolean().optional(),
+  cropsEnabled: z.boolean().optional(),
+  lifestyleEnabled: z.boolean().optional(),
+  industry: z.string().max(100).optional(),
+  targetMarket: z.string().max(100).optional(),
+  targetAudience: z.string().max(100).optional(),
+  targetPurpose: z.string().max(200).optional(),
+  additionalContext: z.string().max(2000).optional(),
+  prefix: z.string().max(100).optional(),
+}).optional();
+
+const GenerateDirectRequestSchema = z.object({
+  jobId: z.number().int().positive(),
+  prompt: z.string().min(1).max(5000),
+  settings: GenerateDirectSettingsSchema,
+});
+
+// ── Security: Storage path boundary check ────────────────────────────────────
+function assertWithinStorage(filePath: string): void {
+  const resolvedStorage = path.resolve(STORAGE_PATH);
+  const resolvedFile = path.resolve(filePath);
+  if (!resolvedFile.startsWith(resolvedStorage + path.sep) && resolvedFile !== resolvedStorage) {
+    throw new Error('Access denied: path is outside storage boundary');
+  }
+}
+
+// ─── Gemini image generation helper ──────────────────────────────────────────
 
 async function callGeminiImageAPI(
   apiKey: string,
@@ -34,7 +102,7 @@ async function callGeminiImageAPI(
       },
     ],
     generationConfig: {
-      responseModalities: ['TEXT', 'IMAGE'],
+      responseModalities: ['IMAGE'],
     },
   };
 
@@ -50,12 +118,10 @@ async function callGeminiImageAPI(
         const errText = await res.text();
         const errLower = errText.toLowerCase();
 
-        // Check for rate limit or quota errors
         if (res.status === 429 || errLower.includes('quota') || errLower.includes('rate limit')) {
           if (attempt < maxRetries - 1) {
-            // Exponential backoff: 2^attempt + random jitter
             const sleepMs = (Math.pow(2, attempt) + (Math.random() + 0.5)) * 1000;
-            console.log(`   ⏳ [API] Rate limited (429). Backing off for ${(sleepMs / 1000).toFixed(1)}s...`);
+            console.log(`   ⏳ [API] Rate limited (429). Backing off ${(sleepMs / 1000).toFixed(1)}s...`);
             await new Promise((resolve) => setTimeout(resolve, sleepMs));
             continue;
           }
@@ -74,14 +140,14 @@ async function callGeminiImageAPI(
         }
       }
 
-      console.warn(`   ⚠️ [API] Warning: API returned empty image data.`);
+      console.warn(`   ⚠️ [API] Gemini returned no image data on attempt ${attempt + 1}`);
       return null;
 
     } catch (err: any) {
       const errorMsg = err.message.toLowerCase();
       if ((errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('rate limit')) && attempt < maxRetries - 1) {
         const sleepMs = (Math.pow(2, attempt) + (Math.random() + 0.5)) * 1000;
-        console.log(`   ⏳ [API] Rate limited. Backing off for ${(sleepMs / 1000).toFixed(1)}s...`);
+        console.log(`   ⏳ [API] Rate limited. Backing off ${(sleepMs / 1000).toFixed(1)}s...`);
         await new Promise((resolve) => setTimeout(resolve, sleepMs));
         continue;
       }
@@ -92,7 +158,7 @@ async function callGeminiImageAPI(
   return null;
 }
 
-// ─── Color variant generation ────────────────────────────────────────────────
+// ─── Color variant generation ─────────────────────────────────────────────────
 
 async function generateColorVariantWithGemini(
   apiKey: string,
@@ -106,28 +172,15 @@ async function generateColorVariantWithGemini(
   return callGeminiImageAPI(apiKey, model, colorPrompt, referenceImageBase64, referenceImageMime);
 }
 
-// ─── Video generation via Gemini Veo (image-to-video) ────────────────────────
-//
-// Step 1: Upload reference image to Gemini Files API → get fileUri
-// Step 2: Call veo-3.1-generate-preview:predictLongRunning with image fileUri
-// Step 3: Poll the long-running operation until done
-// Step 4: Download the MP4 video bytes
-//
-// This mirrors the Python SDK pattern:
-//   operation = client.models.generate_videos(model="veo-3.1-generate-preview", prompt=..., image=...)
-//   while not operation.done: time.sleep(10); operation = client.operations.get(operation)
-//   video.video.save("output.mp4")
-
-// ── Step 1: Generate video via Veo + poll until done ───────────────────────
+// ─── Video generation via Gemini Veo ─────────────────────────────────────────
 
 async function generateVideoWithVeo(
   apiKey: string,
   videoPrompt: string,
   imageBase64: string,
   imageMimeType: string,
-  videoModel: string = 'veo-3.1-generate-preview',
+  videoModel: string = 'veo-2.0-generate-001',
 ): Promise<string | null> {
-  // POST predictLongRunning with image input
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
 
   const body = {
@@ -147,7 +200,7 @@ async function generateVideoWithVeo(
     },
   };
 
-  console.log(`[Video] Starting Veo video generation with model: ${videoModel}`);
+  console.log(`[Video] Starting Veo video generation (model: ${videoModel})`);
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -165,11 +218,10 @@ async function generateVideoWithVeo(
     throw new Error(`Veo returned no operation name: ${JSON.stringify(initData).slice(0, 300)}`);
   }
 
-  console.log(`[Video] Operation started: ${operationName}. Polling for completion...`);
+  console.log(`[Video] Operation started: ${operationName}. Polling...`);
 
-  // ── Step 2: Poll until done (mirrors: while not operation.done: time.sleep(10)) ──
   const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
-  const MAX_POLLS = 60; // up to 10 minutes
+  const MAX_POLLS = 60;
   const POLL_INTERVAL_MS = 10_000;
 
   for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
@@ -189,7 +241,6 @@ async function generateVideoWithVeo(
         throw new Error(`Veo operation failed: ${pollData.error.message || JSON.stringify(pollData.error)}`);
       }
 
-      // Extract video download URI from response using the correct Veo schema path
       const generatedVideos =
         pollData.response?.generateVideoResponse?.generatedSamples ||
         pollData.response?.generatedVideos ||
@@ -199,39 +250,28 @@ async function generateVideoWithVeo(
       for (const videoObj of generatedVideos) {
         const videoUri = videoObj?.video?.uri || videoObj?.uri;
         if (videoUri) {
-          console.log(`[Video] Generation complete. Video URI: ${videoUri}`);
+          console.log(`[Video] Complete. URI: ${videoUri}`);
           return videoUri;
         }
-        // Also check for inline bytes
         const videoBytes = videoObj?.video?.bytesBase64Encoded || videoObj?.video?.videoBytes;
         if (videoBytes) {
-          console.log(`[Video] Generation complete (inline bytes).`);
           return `data:video/mp4;base64,${videoBytes}`;
         }
       }
 
-      throw new Error(`Veo operation done but no video in response: ${JSON.stringify(pollData).slice(0, 500)}`);
+      throw new Error(`Veo done but no video in response: ${JSON.stringify(pollData).slice(0, 500)}`);
     }
   }
 
-  throw new Error(`Veo video generation timed out after ${MAX_POLLS * POLL_INTERVAL_MS / 1000}s`);
+  throw new Error(`Veo timed out after ${MAX_POLLS * POLL_INTERVAL_MS / 1000}s`);
 }
 
-// ── Step 4: Download video from URI → Buffer ──────────────────────────────────
-
-async function downloadVideoFromUri(
-  apiKey: string,
-  videoUri: string,
-): Promise<Buffer> {
-  // Handle inline base64 data URIs (e.g. "data:video/mp4;base64,...")
+async function downloadVideoFromUri(apiKey: string, videoUri: string): Promise<Buffer> {
   if (videoUri.startsWith('data:')) {
     const base64 = videoUri.split(',')[1];
     return Buffer.from(base64, 'base64');
   }
 
-  // Handle Gemini Files API URIs — need to fetch via files download endpoint
-  // URI format: "https://generativelanguage.googleapis.com/v1beta/files/FILE_ID"
-  // Download via: GET <uri>?alt=media&key=API_KEY
   const downloadUrl = videoUri.includes('?')
     ? `${videoUri}&alt=media&key=${apiKey}`
     : `${videoUri}?alt=media&key=${apiKey}`;
@@ -245,8 +285,6 @@ async function downloadVideoFromUri(
   return Buffer.from(arrayBuffer);
 }
 
-// ── Full video generation orchestrator ───────────────────────────────────────
-
 async function generateVideoWithGemini(
   apiKey: string,
   videoModel: string,
@@ -254,80 +292,15 @@ async function generateVideoWithGemini(
   referenceImageBuffer: Buffer,
   referenceImageMime: string,
 ): Promise<Buffer | null> {
-  // Convert buffer to base64 for direct inline usage in Veo API
   const imageBase64 = referenceImageBuffer.toString('base64');
-
-  // Step 1: Generate video via Veo + poll
   const videoUri = await generateVideoWithVeo(apiKey, videoPrompt, imageBase64, referenceImageMime, videoModel);
   if (!videoUri) return null;
-
-  // Step 2: Download video bytes
   const videoBuffer = await downloadVideoFromUri(apiKey, videoUri);
-  console.log(`[Video] Video downloaded successfully (${videoBuffer.length} bytes)`);
+  console.log(`[Video] Downloaded successfully (${videoBuffer.length} bytes)`);
   return videoBuffer;
 }
 
-// ─── Compile spin frames into a preview image (pure Node.js / sharp) ─────────
-//
-// Creates a horizontal contact sheet from the first 8 frames (showing different angles)
-// as a PNG using sharp — no extra dependencies needed.
-// Falls back to returning the first frame buffer if sharp fails.
-
-async function compileAnimatedGIF(frames: Buffer[], _delayMs: number = 200): Promise<Buffer> {
-  if (frames.length === 0) throw new Error('No frames provided for GIF compilation');
-  if (frames.length === 1) return frames[0];
-
-  try {
-    // Use sharp to create a horizontal contact sheet of up to 8 frames
-    // This gives the user a preview without requiring GIF encoding
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sharp = require('sharp');
-
-    // Use up to 8 evenly-spaced frames for the contact sheet
-    const maxFrames = Math.min(frames.length, 8);
-    const step = Math.floor(frames.length / maxFrames);
-    const selectedFrames = Array.from({ length: maxFrames }, (_, i) => frames[i * step]);
-
-    // Get dimensions from the first frame
-    const meta = await sharp(selectedFrames[0]).metadata();
-    const frameW = meta.width || 400;
-    const frameH = meta.height || 400;
-
-    // Resize each frame to a consistent size
-    const THUMB_W = 300;
-    const THUMB_H = Math.round((THUMB_W / frameW) * frameH);
-
-    const resizedFrames = await Promise.all(
-      selectedFrames.map(f =>
-        sharp(f).resize(THUMB_W, THUMB_H, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } }).png().toBuffer()
-      )
-    );
-
-    // Composite them horizontally
-    const totalWidth = THUMB_W * resizedFrames.length;
-    const totalHeight = THUMB_H;
-
-    const composites = resizedFrames.map((buf, i) => ({
-      input: buf,
-      left: i * THUMB_W,
-      top: 0,
-    }));
-
-    const contactSheet = await sharp({
-      create: { width: totalWidth, height: totalHeight, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
-    })
-      .composite(composites)
-      .png()
-      .toBuffer();
-
-    return contactSheet;
-  } catch (err) {
-    console.warn('Contact sheet compilation failed, returning first frame:', err);
-    return frames[0];
-  }
-}
-
-// ─── 360 Spin frame generation ───────────────────────────────────────────────
+// ─── 360 Spin frame generation ────────────────────────────────────────────────
 
 async function generateSpinFrameWithGemini(
   apiKey: string,
@@ -336,29 +309,77 @@ async function generateSpinFrameWithGemini(
   referenceImageMime: string,
   angle: number,
 ): Promise<Buffer | null> {
-  // Locked geometry prompt per angle
   const prompt = `Generate a high-quality product photo of the same item rotated horizontally by exactly ${angle} degrees relative to the camera. Maintain completely locked geometry, original colors, texture, shape, proportions, and fine details. Show the product on a clean studio white background under uniform soft lighting. Do not change any features of the product.`;
-
   return callGeminiImageAPI(apiKey, model, prompt, referenceImageBase64, referenceImageMime);
 }
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
+// ─── Grid assembly using sharp ────────────────────────────────────────────────
+
+async function assembleGrid(
+  colors: string[],
+  generatedImages: Map<string, string>,
+  fallbackImagePath: string,
+  originalDimensions: { width: number; height: number },
+  cols: number,
+  outputPath: string,
+): Promise<void> {
+  const { width: imgWidth, height: imgHeight } = originalDimensions;
+  const rows = Math.ceil(colors.length / cols);
+  const gridWidth = imgWidth * cols;
+  const gridHeight = imgHeight * rows;
+
+  const composites: sharp.OverlayOptions[] = [];
+
+  for (let i = 0; i < colors.length; i++) {
+    const color = colors[i];
+    const imgPath = generatedImages.get(color) || fallbackImagePath;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+
+    const normalizedBuf = await sharp(imgPath)
+      .resize(imgWidth, imgHeight, { fit: 'fill', kernel: 'lanczos3' })
+      .png()
+      .toBuffer();
+
+    composites.push({ input: normalizedBuf, left: col * imgWidth, top: row * imgHeight });
+  }
+
+  await sharp({
+    create: { width: gridWidth, height: gridHeight, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+  })
+    .composite(composites)
+    .png()
+    .toFile(outputPath);
+}
+
+// ─── Main POST handler ────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
     const userId = await getUserId(req);
     if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const body = await req.json();
-    const { jobId, prompt, settings } = body;
-
-    if (!jobId || !prompt) {
-      return NextResponse.json({ error: 'jobId and prompt are required' }, { status: 400 });
+    // ── Validate request body with Zod ────────────────────────────────────────
+    let parsedBody: z.infer<typeof GenerateDirectRequestSchema>;
+    try {
+      const rawBody = await req.json();
+      const parseResult = GenerateDirectRequestSchema.safeParse(rawBody);
+      if (!parseResult.success) {
+        return NextResponse.json(
+          { error: 'Invalid request', details: parseResult.error.flatten().fieldErrors },
+          { status: 400 },
+        );
+      }
+      parsedBody = parseResult.data;
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
+
+    const { jobId, prompt, settings } = parsedBody;
 
     // Verify job ownership
     const job = await prisma.job.findFirst({
-      where: { id: Number(jobId), userId: Number(userId) },
+      where: { id: jobId, userId: Number(userId) },
       include: { assets: { where: { type: 'original' } } },
     });
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
@@ -374,11 +395,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Decrypt API key if encrypted
+    const geminiApiKey = decryptApiKey(geminiProvider.apiKey);
+
     // Load reference image
     const originalAsset = job.assets[0];
     if (!originalAsset) {
-      return NextResponse.json({ error: 'No reference image found for this job' }, { status: 400 });
+      return NextResponse.json({ error: 'No reference image found for this job. Please upload an image first.' }, { status: 400 });
     }
+
+    // ── SECURITY: validate ref image path is within storage ──────────────────
+    assertWithinStorage(originalAsset.path);
 
     const { readFile } = await import('fs/promises');
     let refImageBuffer: Buffer;
@@ -389,16 +416,17 @@ export async function POST(req: NextRequest) {
     }
 
     const refImageBase64 = refImageBuffer.toString('base64');
-    const refImageMime = originalAsset.path.toLowerCase().endsWith('.png')
-      ? 'image/png'
-      : 'image/jpeg';
+    const refImageMime = originalAsset.path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 
-    // Model config
+    // Config
     const imageModel = settings?.imageModel || 'gemini-2.0-flash-preview-image-generation';
-    const colors: string[] = settings?.colors || ['White', 'Black', 'Blue', 'Red'];
+    const colors: string[] = (settings?.colors && settings.colors.length > 0)
+      ? settings.colors
+      : ['White', 'Black', 'Blue', 'Red'];
     const videoPromptText = settings?.videoPrompt || 'Cinematic showcase of the product under dynamic studio lighting';
+    const gridCols = settings?.cols || 2;
 
-    // Update job status to PROCESSING
+    // Update job status
     await prisma.job.update({
       where: { id: job.id },
       data: {
@@ -413,29 +441,28 @@ export async function POST(req: NextRequest) {
         generation: {
           upsert: {
             create: { metadata: settings || {} },
-            update: { metadata: settings || {} },
+            update: settings ? { metadata: settings as any } : {},
           },
         },
       },
     });
 
+    log.info({ jobId: job.id, colors: colors.length, imageModel }, 'Generation started');
+
     // Setup storage
-    const baseStorage = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage');
-    const jobAssetDir = path.join(baseStorage, 'assets', String(job.id));
+    const jobAssetDir = path.join(STORAGE_PATH, 'assets', String(job.id));
     await mkdir(jobAssetDir, { recursive: true });
+    // ── SECURITY: Validate output directory ──────────────────────────────────
+    assertWithinStorage(jobAssetDir);
 
     // ── 1. Generate color variants ────────────────────────────────────────────
     const results: { color: string; assetId?: number; error?: string; filePath?: string }[] = [];
 
     const generateColor = async (colorName: string) => {
+      console.log(`[Generate-Direct] Generating color: ${colorName}`);
       try {
         const imgBuffer = await generateColorVariantWithGemini(
-          geminiProvider.apiKey,
-          imageModel,
-          prompt,
-          refImageBase64,
-          refImageMime,
-          colorName,
+          geminiApiKey, imageModel, prompt, refImageBase64, refImageMime, colorName,
         );
 
         if (!imgBuffer) {
@@ -446,30 +473,47 @@ export async function POST(req: NextRequest) {
         const safeColor = colorName.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '').toLowerCase();
         const filename = `raw_${safeColor}.png`;
         const filePath = path.join(jobAssetDir, filename);
+        assertWithinStorage(filePath);
+
         await writeFile(filePath, imgBuffer);
+
+        // ── WebP compression pass (P3.6) ──────────────────────────────────────
+        // Save a compressed WebP alongside the PNG (~60-70% smaller).
+        // Used for web delivery; PNG is kept for downstream processing (grid, crops).
+        let webpAssetId: number | undefined;
+        try {
+          const webpFilename = `raw_${safeColor}.webp`;
+          const webpPath = path.join(jobAssetDir, webpFilename);
+          assertWithinStorage(webpPath);
+          const webpBuffer = await sharp(imgBuffer).webp({ quality: 85, effort: 4 }).toBuffer();
+          await writeFile(webpPath, webpBuffer);
+          const webpAsset = await prisma.asset.create({
+            data: { type: 'variant-webp', path: webpPath, status: 'done', jobId: job.id },
+          });
+          webpAssetId = webpAsset.id;
+        } catch (webpErr: any) {
+          console.warn(`[WebP] Compression failed for ${colorName}:`, webpErr.message);
+        }
 
         const existing = await prisma.asset.findFirst({
           where: { jobId: job.id, type: 'variant', path: filePath },
         });
         let asset;
         if (existing) {
-          asset = await prisma.asset.update({
-            where: { id: existing.id },
-            data: { status: 'done', path: filePath },
-          });
+          asset = await prisma.asset.update({ where: { id: existing.id }, data: { status: 'done', path: filePath } });
         } else {
-          asset = await prisma.asset.create({
-            data: { type: 'variant', path: filePath, status: 'done', jobId: job.id },
-          });
+          asset = await prisma.asset.create({ data: { type: 'variant', path: filePath, status: 'done', jobId: job.id } });
         }
 
         results.push({ color: colorName, assetId: asset.id, filePath });
+
       } catch (err: any) {
+        console.error(`[Generate-Direct] Error for color ${colorName}:`, err.message);
         results.push({ color: colorName, error: err.message });
       }
     };
 
-    // Process in batches of 3 (rate limit friendly)
+    // Process in batches of 3 (rate-limit friendly)
     const BATCH = 3;
     for (let i = 0; i < colors.length; i += BATCH) {
       const batch = colors.slice(i, i + BATCH);
@@ -479,325 +523,204 @@ export async function POST(req: NextRequest) {
     const failedColors = results.filter((r) => r.error);
     const successResults = results.filter((r) => r.assetId && r.filePath);
     const successCount = successResults.length;
-
     const finalStatus = failedColors.length === colors.length ? 'FAILED' : 'COMPLETED';
 
     if (successCount > 0) {
-      const safePrefix = job.name
-        .trim()
-        .replace(/\s+/g, '_')
-        .replace(/[^A-Za-z0-9_-]/g, '');
+      const safePrefix = job.name.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_-]/g, '');
 
-      // ── 2. Grid generation (Fault-Tolerant Compiler Matrix) ─────────────────────
+      // Get original image dimensions for grid
+      const originalMeta = await sharp(originalAsset.path).metadata();
+      const imgDimensions = { width: originalMeta.width || 800, height: originalMeta.height || 600 };
+
+      // ── 2. Grid generation ───────────────────────────────────────────────────
       const gridPath = path.join(jobAssetDir, `grid_${safePrefix}_production_grid.png`);
-      const gridCols = settings?.cols || 3;
-      const gridRows = Math.ceil(colors.length / gridCols);
+      assertWithinStorage(gridPath);
 
-      if (colors.length > 0) {
-        console.log(`\n[System] Assembling the ${gridCols}x${gridRows} Grid Matrix...`);
-        try {
-          const originalMeta = await sharp(originalAsset.path).metadata();
-          const imgWidth = originalMeta.width || 800;
-          const imgHeight = originalMeta.height || 600;
-
-          const gridWidth = imgWidth * gridCols;
-          const gridHeight = imgHeight * gridRows;
-
-          const compositeLayers = [];
-
-          // Base canvas layer
-          compositeLayers.push({
-            input: { create: { width: gridWidth, height: gridHeight, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } } },
-            left: 0,
-            top: 0
-          });
-
-          // Map successful generation paths by color
-          const generatedImages = new Map<string, string>();
-          for (const res of successResults) {
-            generatedImages.set(res.color, res.filePath!);
-          }
-
-          // Fault-tolerant assembly looping over ALL colors
-          for (let i = 0; i < colors.length; i++) {
-            const color = colors[i];
-            // Fallback to the original image if this specific thread failed
-            const imgPath = generatedImages.get(color) || originalAsset.path;
-
-            const col = i % gridCols;
-            const row = Math.floor(i / gridCols);
-            const left = col * imgWidth;
-            const top = row * imgHeight;
-
-            // Edge Case: Force dimension normalization in case the model hallucinated a different crop
-            const normalizedImgBuffer = await sharp(imgPath)
-              .resize(imgWidth, imgHeight, { fit: 'fill', kernel: 'lanczos3' })
-              .toBuffer();
-
-            compositeLayers.push({
-              input: normalizedImgBuffer,
-              left,
-              top
-            });
-          }
-
-          // Output the grid
-          await sharp({
-            create: {
-              width: gridWidth,
-              height: gridHeight,
-              channels: 4,
-              background: { r: 255, g: 255, b: 255, alpha: 1 }
-            }
-          })
-            .composite(compositeLayers)
-            .toFile(gridPath);
-
-          await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'grid' } });
-          await prisma.asset.create({
-            data: { jobId: job.id, type: 'grid', path: gridPath, status: 'done' }
-          });
-          console.log(`🚀 Pipeline execution complete! Final output ready at: ${gridPath}`);
-        } catch (err: any) {
-          console.error('CRITICAL: Failed to assemble grid matrix:', err.message);
+      try {
+        console.log(`\n[System] Assembling ${gridCols}x${Math.ceil(colors.length / gridCols)} grid...`);
+        const generatedImages = new Map<string, string>();
+        for (const res of successResults) {
+          generatedImages.set(res.color, res.filePath!);
         }
+
+        await assembleGrid(colors, generatedImages, originalAsset.path, imgDimensions, gridCols, gridPath);
+
+        await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'grid' } });
+        await prisma.asset.create({ data: { jobId: job.id, type: 'grid', path: gridPath, status: 'done' } });
+        console.log(`✅ Grid assembled: ${gridPath}`);
+      } catch (err: any) {
+        console.error('Grid assembly failed:', err.message);
       }
 
-      // ── 3. Video generation via Gemini Veo (image-to-video) ───────────────
+      // ── 3. Video generation via Gemini Veo (async — enqueued to BullMQ) ────────
+      // Video generation takes up to 10 minutes. We enqueue it as a background job
+      // instead of blocking this HTTP request. The frontend can poll job status or
+      // use SSE to receive the completion event.
       if (settings?.videoEnabled === true) {
-        const videoModel = settings?.videoModel || 'veo-3.1-generate-preview';
+        const videoModel = settings?.videoModel || 'veo-2.0-generate-001';
         const videoPath = path.join(jobAssetDir, `${safePrefix}_showcase.mp4`);
+        assertWithinStorage(videoPath);
 
-        console.log(`[Video] Starting Veo video generation (model: ${videoModel})...`);
         try {
-          const videoBuffer = await generateVideoWithGemini(
-            geminiProvider.apiKey,
-            videoModel,
-            videoPromptText,
-            refImageBuffer, // Pass original Buffer, not base64
-            refImageMime,
-          );
+          // Create a pending 'video' asset so the UI knows video is in progress
+          await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'video' } });
+          await prisma.asset.create({
+            data: { jobId: job.id, type: 'video', path: videoPath, status: 'pending' },
+          });
 
-          if (videoBuffer) {
-            await writeFile(videoPath, videoBuffer);
-            await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'video' } });
-            await prisma.asset.create({
-              data: { jobId: job.id, type: 'video', path: videoPath, status: 'done' }
-            });
-            console.log(`[Video] MP4 saved successfully at: ${videoPath} (${videoBuffer.length} bytes)`);
-          } else {
-            console.warn('[Video] generateVideoWithGemini returned null — no video saved');
-          }
+          await veoVideoQueue.add('generate-video', {
+            jobId: job.id,
+            geminiApiKey,
+            imageModel,
+            videoModel,
+            videoPrompt: videoPromptText,
+            refImagePath: originalAsset.path,
+            refImageMime,
+            videoPath,
+            fallbackSafePrefix: safePrefix,
+            jobAssetDir,
+          }, {
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnComplete: { count: 100 },
+            removeOnFail: { count: 50 },
+          });
+          console.log(`[Video] Enqueued Veo video job for job ${job.id}`);
         } catch (err: any) {
-          console.error('[Video] Veo generation failed:', err.message);
-          // Graceful fallback: generate a high-quality showcase still image
-          // so the video slot isn't empty in the review UI
-          try {
-            const fallbackPrompt = `${videoPromptText}. Cinematic product showcase — dramatic studio hero shot with premium lighting.`;
-            const fallbackBuffer = await callGeminiImageAPI(
-              geminiProvider.apiKey, imageModel, fallbackPrompt, refImageBase64, refImageMime
-            );
-            if (fallbackBuffer) {
-              const fallbackPath = path.join(jobAssetDir, `${safePrefix}_showcase_still.png`);
-              await writeFile(fallbackPath, fallbackBuffer);
-              await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'video' } });
-              await prisma.asset.create({
-                data: { jobId: job.id, type: 'video', path: fallbackPath, status: 'done' }
-              });
-              console.log('[Video] Fallback showcase still saved at:', fallbackPath);
-            }
-          } catch (fallbackErr: any) {
-            console.error('[Video] Fallback still also failed:', fallbackErr.message);
-          }
+          console.error('[Video] Failed to enqueue Veo job:', err.message);
         }
       }
 
-      // ── 4. 360 Spin generation (0° to 350° in 10° steps) ───────────────────
+      // ── 4. 360 Spin generation ───────────────────────────────────────────────
       if (settings?.spinEnabled === true) {
-        console.log('Starting 360 spin frame generation using Image-to-Image...');
+        console.log('Starting 360 spin frame generation...');
         const angles = Array.from({ length: 36 }, (_, i) => i * 10);
         const spinResults: { angle: number; filePath: string; buffer: Buffer }[] = [];
 
         const generateAngleFrame = async (angle: number) => {
           try {
             const frameBuffer = await generateSpinFrameWithGemini(
-              geminiProvider.apiKey,
-              imageModel,
-              refImageBase64,
-              refImageMime,
-              angle,
+              geminiApiKey, imageModel, refImageBase64, refImageMime, angle,
             );
-
             if (frameBuffer) {
               const filename = `${safePrefix}_360_${String(angle).padStart(3, '0')}.png`;
               const filePath = path.join(jobAssetDir, filename);
+              assertWithinStorage(filePath);
               await writeFile(filePath, frameBuffer);
               spinResults.push({ angle, filePath, buffer: frameBuffer });
             }
           } catch (err: any) {
-            console.error(`Failed to generate 360 spin frame for angle ${angle}:`, err.message);
+            console.error(`Spin frame ${angle}° failed:`, err.message);
           }
         };
 
-        // Process in batches of 6 (rate-limit friendly)
-        const SPIN_BATCH = 6;
+        const SPIN_BATCH = 4;
         for (let i = 0; i < angles.length; i += SPIN_BATCH) {
-          const batch = angles.slice(i, i + SPIN_BATCH);
-          await Promise.all(batch.map(generateAngleFrame));
+          await Promise.all(angles.slice(i, i + SPIN_BATCH).map(generateAngleFrame));
         }
 
-        console.log(`Generated ${spinResults.length}/36 spin frames.`);
-
         if (spinResults.length > 0) {
-          // Sort frames by angle
           spinResults.sort((a, b) => a.angle - b.angle);
 
-          // Compile contact sheet from spin frames (uses sharp, no extra deps)
-          const spinGifPath = path.join(jobAssetDir, `${safePrefix}_turntable.png`);
+          // Build contact sheet from spin frames
+          const spinContactPath = path.join(jobAssetDir, `${safePrefix}_turntable.png`);
+          assertWithinStorage(spinContactPath);
           try {
-            const spinBuffers = spinResults.map(r => r.buffer);
-            const gifBuffer = await compileAnimatedGIF(spinBuffers, 80);
-            await writeFile(spinGifPath, gifBuffer);
+            const maxFrames = Math.min(spinResults.length, 8);
+            const step = Math.floor(spinResults.length / maxFrames);
+            const selected = Array.from({ length: maxFrames }, (_, i) => spinResults[i * step].buffer);
+            const meta = await sharp(selected[0]).metadata();
+            const fW = meta.width || 400;
+            const fH = meta.height || 400;
+            const THUMB_W = 300;
+            const THUMB_H = Math.round((THUMB_W / fW) * fH);
+
+            const resized = await Promise.all(
+              selected.map(f => sharp(f).resize(THUMB_W, THUMB_H, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } }).png().toBuffer())
+            );
+
+            const contactComposites: sharp.OverlayOptions[] = resized.map((buf, i) => ({ input: buf, left: i * THUMB_W, top: 0 }));
+
+            await sharp({ create: { width: THUMB_W * resized.length, height: THUMB_H, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } } })
+              .composite(contactComposites)
+              .png()
+              .toFile(spinContactPath);
 
             await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'spin' } });
-            await prisma.asset.create({
-              data: { jobId: job.id, type: 'spin', path: spinGifPath, status: 'done' }
-            });
-            console.log('360 spin contact sheet saved at:', spinGifPath);
-          } catch (err) {
-            // Compilation failed — save first frame as spin asset instead
-            console.warn('Contact sheet compilation failed, saving first spin frame as spin asset:', err);
+            await prisma.asset.create({ data: { jobId: job.id, type: 'spin', path: spinContactPath, status: 'done' } });
+          } catch (err: any) {
+            console.warn('Contact sheet failed, saving first frame:', err.message);
             const firstFrame = spinResults[0];
             await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'spin' } });
-            await prisma.asset.create({
-              data: { jobId: job.id, type: 'spin', path: firstFrame.filePath, status: 'done' }
-            });
+            await prisma.asset.create({ data: { jobId: job.id, type: 'spin', path: firstFrame.filePath, status: 'done' } });
           }
 
-          // Save individual spin frames as 'spin-frame' assets for the interactive viewer
           await prisma.asset.deleteMany({ where: { jobId: job.id, type: 'spin-frame' } });
           for (const frame of spinResults) {
-            await prisma.asset.create({
-              data: { jobId: job.id, type: 'spin-frame', path: frame.filePath, status: 'done' }
-            });
+            await prisma.asset.create({ data: { jobId: job.id, type: 'spin-frame', path: frame.filePath, status: 'done' } });
           }
-
-          // Also save a JSON manifest of all spin frames for the frontend
-          const manifestPath = path.join(jobAssetDir, `${safePrefix}_360_manifest.json`);
-          await writeFile(manifestPath, JSON.stringify({
-            frames: spinResults.map(r => ({ angle: r.angle, file: path.basename(r.filePath) })),
-            total: spinResults.length,
-          }, null, 2));
         }
       }
 
-      // ── 5. Background Removal & Social Crops (via Node Native) ───────────────
-      const processedDir = path.join(jobAssetDir, 'processed');
-      if (settings?.cropsEnabled !== false || settings?.removeBackground !== false) {
-        console.log('\\n[System] Generating background-removed images and social media crops natively...');
-        if (!require('fs').existsSync(processedDir)) {
-          require('fs').mkdirSync(processedDir, { recursive: true });
-        }
+      // ── 5. Social Crops via sharp (no @imgly dependency) ─────────────────────
+      if (settings?.cropsEnabled !== false) {
+        const processedDir = path.join(jobAssetDir, 'processed');
+        assertWithinStorage(processedDir);
+        await mkdir(processedDir, { recursive: true });
 
-        // Dynamically load background removal module
-        let removeBackground: any = null;
-        try {
-          const imgly = await import('@imgly/background-removal-node');
-          removeBackground = imgly.removeBackground;
-        } catch (e: any) {
-          console.warn('⚠️ Could not load @imgly/background-removal-node. Skipping background removal:', e.message);
-        }
+        for (const result of successResults) {
+          const inputPath = result.filePath!;
+          const colorSlug = result.color.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '').toLowerCase();
 
-        try {
-          for (const result of successResults) {
-            const inputPath = result.filePath!;
-            const colorSlug = result.color.replace(/\\s+/g, '_');
+          try {
+            const metadata = await sharp(inputPath).metadata();
+            const w = metadata.width || 800;
+            const h = metadata.height || 600;
+            const aspect = w / h;
 
-            // ── A. Background Removal ──
-            const processedPath = path.join(processedDir, `raw_${colorSlug}.png`);
-            let useImgPath = inputPath; // default to original if bg removal fails
+            // 1. Instagram 1:1
+            const sqSize = Math.min(w, h);
+            const instaPath = path.join(processedDir, `${safePrefix}_${colorSlug}_instagram.png`);
+            assertWithinStorage(instaPath);
+            await sharp(inputPath)
+              .extract({ left: Math.floor((w - sqSize) / 2), top: Math.floor((h - sqSize) / 2), width: sqSize, height: sqSize })
+              .png()
+              .toFile(instaPath);
+            await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: instaPath, status: 'approved' } });
 
-            if (removeBackground) {
-              console.log(`[Background] Removing background for variant: ${colorSlug}...`);
-              try {
-                // Format URL as file:// for local paths in node
-                const bgBlob = await removeBackground(`file://${inputPath.replace(/\\\\/g, '/')}`);
-                const bgBuffer = Buffer.from(await bgBlob.arrayBuffer());
-                await writeFile(processedPath, bgBuffer);
+            // 2. Banner 16:9
+            const banner169 = 16 / 9;
+            let bW = w, bH = h, bLeft = 0, bTop = 0;
+            if (aspect > banner169) { bW = Math.floor(h * banner169); bLeft = Math.floor((w - bW) / 2); }
+            else { bH = Math.floor(w / banner169); bTop = Math.floor((h - bH) / 2); }
+            const bannerPath = path.join(processedDir, `${safePrefix}_${colorSlug}_banner.png`);
+            assertWithinStorage(bannerPath);
+            await sharp(inputPath).extract({ left: bLeft, top: bTop, width: bW, height: bH }).png().toFile(bannerPath);
+            await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: bannerPath, status: 'approved' } });
 
-                await prisma.asset.create({
-                  data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id }
-                });
-                useImgPath = processedPath; // Use the transparent image for crops!
-              } catch (bgErr: any) {
-                console.error(`[Background] Failed to remove background for ${colorSlug}:`, bgErr.message);
-                await require('fs').promises.copyFile(inputPath, processedPath);
-              }
-            } else {
-              // Fallback: just copy original to processed if module not found
-              await require('fs').promises.copyFile(inputPath, processedPath);
-              await prisma.asset.create({
-                data: { jobId: job.id, type: 'processed', path: processedPath, status: 'done', originalAssetId: originalAsset?.id }
-              });
-            }
-
-            // ── B. Social Crops ──
-            if (settings?.cropsEnabled !== false) {
-              const metadata = await sharp(useImgPath).metadata();
-              const w = metadata.width || 800;
-              const h = metadata.height || 600;
-              const currentAspect = w / h;
-
-              // 1. Instagram 1:1
-              const sqSize = Math.min(w, h);
-              const sqLeft = Math.floor((w - sqSize) / 2);
-              const sqTop = Math.floor((h - sqSize) / 2);
-              const instaPath = path.join(processedDir, `${safePrefix}_${colorSlug}_instagram.png`);
-              await sharp(useImgPath).extract({ left: sqLeft, top: sqTop, width: sqSize, height: sqSize }).toFile(instaPath);
-              await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: instaPath, status: 'approved' } });
-
-              // 2. Banner 16:9
-              const targetAspectBanner = 16.0 / 9.0;
-              let bW = w, bH = h, bLeft = 0, bTop = 0;
-              if (currentAspect > targetAspectBanner) {
-                bW = Math.floor(h * targetAspectBanner);
-                bLeft = Math.floor((w - bW) / 2);
-              } else {
-                bH = Math.floor(w / targetAspectBanner);
-                bTop = Math.floor((h - bH) / 2);
-              }
-              const bannerPath = path.join(processedDir, `${safePrefix}_${colorSlug}_banner.png`);
-              await sharp(useImgPath).extract({ left: bLeft, top: bTop, width: bW, height: bH }).toFile(bannerPath);
-              await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: bannerPath, status: 'approved' } });
-
-              // 3. Story 9:16
-              const targetAspectStory = 9.0 / 16.0;
-              let sW = w, sH = h, sLeft = 0, sTop = 0;
-              if (currentAspect > targetAspectStory) {
-                sW = Math.floor(h * targetAspectStory);
-                sLeft = Math.floor((w - sW) / 2);
-              } else {
-                sH = Math.floor(w / targetAspectStory);
-                sTop = Math.floor((h - sH) / 2);
-              }
-              const storyPath = path.join(processedDir, `${safePrefix}_${colorSlug}_story.png`);
-              await sharp(useImgPath).extract({ left: sLeft, top: sTop, width: sW, height: sH }).toFile(storyPath);
-              await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: storyPath, status: 'approved' } });
-            }
+            // 3. Story 9:16
+            const story916 = 9 / 16;
+            let sW = w, sH = h, sLeft = 0, sTop = 0;
+            if (aspect > story916) { sW = Math.floor(h * story916); sLeft = Math.floor((w - sW) / 2); }
+            else { sH = Math.floor(w / story916); sTop = Math.floor((h - sH) / 2); }
+            const storyPath = path.join(processedDir, `${safePrefix}_${colorSlug}_story.png`);
+            assertWithinStorage(storyPath);
+            await sharp(inputPath).extract({ left: sLeft, top: sTop, width: sW, height: sH }).png().toFile(storyPath);
+            await prisma.asset.create({ data: { jobId: job.id, type: 'crop', path: storyPath, status: 'approved' } });
+          } catch (err: any) {
+            console.error(`Crops failed for ${colorSlug}:`, err.message);
           }
-          console.log('Native social media crops generated successfully');
-        } catch (err: any) {
-          console.error('Failed to generate native crops:', err.message);
         }
       }
     }
 
+    // ── Finalize job ──────────────────────────────────────────────────────────
     await prisma.job.update({
       where: { id: job.id },
       data: {
         status: finalStatus as any,
         completedAt: new Date(),
-        progress: successCount / colors.length,
+        progress: colors.length > 0 ? successCount / colors.length : 0,
         errorMessage: failedColors.length > 0 ? `${failedColors.length} color(s) failed` : null,
         statusHistory: results.map((r) => ({
           color: r.color,
@@ -806,6 +729,10 @@ export async function POST(req: NextRequest) {
         })) as any,
       },
     });
+
+    // Log cost estimate (P5.3)
+    logGenerationCost(job.id, successCount, settings?.videoEnabled === true, failedColors.length);
+    log.info({ jobId: job.id, generated: successCount, failed: failedColors.length, status: finalStatus }, 'Generation complete');
 
     return NextResponse.json({
       success: true,
@@ -816,7 +743,12 @@ export async function POST(req: NextRequest) {
       failed: failedColors.map((r) => ({ color: r.color, error: r.error })),
     });
   } catch (err: any) {
-    console.error('Direct Generate Error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    logErrorEvent('generate-direct', err);
+    if (err.message === 'Access denied: path is outside storage boundary') {
+      return NextResponse.json({ error: 'Invalid file path' }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// decryptApiKey is imported from '../../../../lib/crypto'

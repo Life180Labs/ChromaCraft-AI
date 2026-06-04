@@ -21,13 +21,16 @@ RUN npm install --legacy-peer-deps
 # Copy application files
 COPY worker.ts ./
 COPY orchestrator.ts ./
+COPY veoWorker.ts ./
 COPY python/ ./python/
 
 # Generate Prisma Client
 COPY prisma/schema.prisma ./prisma/
 RUN npx prisma generate --schema=./prisma/schema.prisma
 
-# Build TypeScript
-RUN npx tsc worker.ts --target es2022 --module commonjs --esModuleInterop --moduleResolution node
+# Build TypeScript (compile all .ts files together to resolve cross-file imports)
+RUN npx tsc worker.ts orchestrator.ts veoWorker.ts \
+    --target es2022 --module commonjs --esModuleInterop \
+    --moduleResolution node --skipLibCheck
 
 CMD npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss && node worker.js

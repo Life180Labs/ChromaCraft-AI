@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
+import { encryptApiKey, decryptApiKey } from '../../../../lib/crypto';
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,6 +9,10 @@ export async function GET(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
     const providers = await prisma.aiProvider.findMany({
+      where: {
+        // Exclude internal settings provider from the list
+        NOT: { name: '__app_settings__' },
+      },
       select: {
         id: true,
         name: true,
@@ -19,11 +24,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       providers.map(({ apiKey, ...provider }) => ({
         ...provider,
+        // Only expose whether a key is set — never expose the key value or its encrypted form
         hasApiKey: Boolean(apiKey?.trim()),
       }))
     );
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -33,25 +39,36 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
     const { name, apiKey, isDefault } = await req.json();
-    if (!name) {
+    if (!name || typeof name !== 'string') {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });
     }
 
-    const existing = await prisma.aiProvider.findUnique({ where: { name } });
+    // Sanitize name
+    const safeName = name.trim().slice(0, 100);
+
+    const existing = await prisma.aiProvider.findUnique({ where: { name: safeName } });
     const preserveKey = !apiKey || apiKey === 'unchanged';
 
-    if (!existing && preserveKey && name.toLowerCase() !== 'mock') {
+    if (!existing && preserveKey && safeName.toLowerCase() !== 'mock') {
       return NextResponse.json({ error: 'apiKey is required for new providers' }, { status: 400 });
     }
 
-    const resolvedKey =
-      preserveKey && existing
-        ? existing.apiKey
-        : preserveKey && name.toLowerCase() === 'mock'
-          ? 'mock'
-          : apiKey;
+    // Resolve and encrypt the key
+    let resolvedKey: string;
+    if (preserveKey && existing) {
+      // Keep existing encrypted key as-is
+      resolvedKey = existing.apiKey;
+    } else if (preserveKey && safeName.toLowerCase() === 'mock') {
+      resolvedKey = 'mock';
+    } else {
+      // Encrypt the new key before storing
+      if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+        return NextResponse.json({ error: 'apiKey must be a non-empty string' }, { status: 400 });
+      }
+      resolvedKey = encryptApiKey(apiKey.trim());
+    }
 
-    if (isDefault) {
+    if (isDefault === true) {
       await prisma.aiProvider.updateMany({
         where: { default: true },
         data: { default: false },
@@ -59,13 +76,13 @@ export async function POST(req: NextRequest) {
     }
 
     const provider = await prisma.aiProvider.upsert({
-      where: { name },
+      where: { name: safeName },
       update: {
         ...(preserveKey && existing ? {} : { apiKey: resolvedKey }),
         ...(typeof isDefault === 'boolean' ? { default: isDefault } : {}),
       },
       create: {
-        name,
+        name: safeName,
         apiKey: resolvedKey,
         default: !!isDefault,
       },
@@ -76,6 +93,7 @@ export async function POST(req: NextRequest) {
       provider: { id: provider.id, name: provider.name, default: provider.default },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    console.error('[Providers API] Error:', err.message);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

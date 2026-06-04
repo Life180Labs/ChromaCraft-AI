@@ -1,8 +1,46 @@
+/**
+ * POST /api/v1/generate
+ *
+ * Single, unified generation endpoint.
+ *
+ * Previously this routed to the Stability AI BullMQ worker via orchestrator.ts.
+ * Now it forwards to the Gemini-direct pipeline exclusively, which:
+ *   1. Validates inputs with Zod
+ *   2. Generates color variants via Gemini image API
+ *   3. Assembles a grid with sharp
+ *   4. Enqueues video to veoVideoWorker (async, non-blocking)
+ *   5. Optionally generates 360-spin frames and social crops
+ *
+ * The generate-direct handler lives at:
+ *   apps/web/app/api/v1/generate-direct/route.ts
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserId } from '../../../../lib/auth';
 import prisma from '../../../../lib/prisma';
-import { generateQueue } from '../../../../lib/bullmq';
 import { GenerateRequestSchema } from '../../../../lib/validations';
+import { decryptApiKey } from '../../../../lib/crypto';
+
+// ── Allowed model allowlists (must match generate-direct) ─────────────────────
+const ALLOWED_IMAGE_MODELS = [
+  'gemini-3.1-flash-image',
+  'gemini-3.1-flash',
+  'gemini-3.1-pro',
+  'gemini-2.0-flash-preview-image-generation',
+  'gemini-2.0-flash-exp-image-generation',
+  'gemini-2.5-flash-preview-05-20',
+  'imagen-3.0-generate-002',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+];
+const ALLOWED_VIDEO_MODELS = [
+  'veo-3.1-generate-001',
+  'veo-3.1-generate-preview',
+  'veo-3.0-generate-001',
+  'veo-3.0-generate-preview',
+  'veo-2.0-generate-001',
+  'veo-2.0-generate-preview',
+];
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,7 +49,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
-    // Zod validation
+    // Validate with Zod
     const parsed = GenerateRequestSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({
@@ -20,126 +58,93 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { jobId, prompt, providerId, settings } = parsed.data;
+    const { jobId, prompt, settings } = parsed.data;
 
-    // Verify job ownership
+    // Verify job ownership + has a reference image
     const job = await prisma.job.findFirst({
       where: { id: Number(jobId), userId: Number(userId) },
+      include: { assets: { where: { type: 'original' } } },
     });
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-
-    // Determine AI Provider
-    let activeProvider = null;
-    if (providerId) {
-      activeProvider = await prisma.aiProvider.findUnique({ where: { id: Number(providerId) } });
-    } else {
-      activeProvider = await prisma.aiProvider.findFirst({ where: { default: true } });
-      if (!activeProvider) activeProvider = await prisma.aiProvider.findFirst();
+    if (job.assets.length === 0) {
+      return NextResponse.json(
+        { error: 'No reference image found. Please upload a product image first.' },
+        { status: 400 },
+      );
     }
 
-    if (!activeProvider || activeProvider.name.toLowerCase() === 'mock') {
-      return NextResponse.json({
-        error: 'No active AI Provider configured. Configure Stability AI or Google Gemini in Profile Settings.',
-      }, { status: 400 });
-    }
-
-    const providerName = activeProvider.name;
-    const apiKey = activeProvider.apiKey;
-
-    // Save generation config
-    const safePrefix = (settings?.prefix || job.name)
-      .trim()
-      .replace(/\s+/g, '_')
-      .replace(/[^A-Za-z0-9_-]/g, '');
-
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: 'PROCESSING',
-        provider: { connect: { id: activeProvider.id } },
-        prompt: {
-          upsert: {
-            create: { name: 'generation-prompt', content: prompt },
-            update: { content: prompt },
-          },
-        },
-        generation: {
-          upsert: {
-            create: { metadata: settings || {} },
-            update: { metadata: settings || {} },
-          },
-        },
-        generationConfig: {
-          upsert: {
-            create: {
-              strategy: 'STABILITY_SEARCH_REPLACE',
-              denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
-              controlNetEnabled: (settings as any)?.identityLock !== false,
-              identityLock: (settings as any)?.identityLock !== false,
-              seed: 42,
-              colors: settings?.colors || [],
-              gridCols: settings?.cols || 4,
-              gridRows: settings?.rows || 3,
-              spinFrames: settings?.spinFrames || 36,
-              qualityThreshold: (settings as any)?.qualityThreshold ?? 0.92,
-            },
-            update: {
-              strategy: 'STABILITY_SEARCH_REPLACE',
-              denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
-            },
-          },
-        },
+    // Verify Gemini API key is configured
+    const geminiProvider = await prisma.aiProvider.findFirst({
+      where: {
+        name: { contains: 'gemini', mode: 'insensitive' },
+        NOT: { name: '__app_settings__' },
       },
     });
+    if (!geminiProvider?.apiKey) {
+      return NextResponse.json(
+        { error: 'Gemini API key not configured. Add it in Profile → API Keys.' },
+        { status: 400 },
+      );
+    }
+    // Validate key is decryptable (catches key rotation/corruption early)
+    try { decryptApiKey(geminiProvider.apiKey); } catch {
+      return NextResponse.json(
+        { error: 'Gemini API key is misconfigured. Please re-enter it in Profile → API Keys.' },
+        { status: 400 },
+      );
+    }
 
-    const catalogSettings = {
-      prefix: safePrefix,
-      colors: settings?.colors || [],
-      cols: settings?.cols || 4,
-      rows: settings?.rows || 3,
-      industry: settings?.industry || 'Automotive',
-      targetMarket: settings?.targetMarket || 'Global',
-      targetAudience: settings?.targetAudience || 'General consumers',
-      targetPurpose: settings?.targetPurpose || 'Product catalog',
-      lifestyleEnabled: settings?.lifestyleEnabled ?? false,
-      videoEnabled: settings?.videoEnabled ?? false,
-      spinEnabled: settings?.spinEnabled ?? false,
-      cropsEnabled: settings?.cropsEnabled ?? false,
-      imageSize: settings?.imageSize || '800x600',
-      spinFrames: settings?.spinFrames || 36,
-      fps: settings?.fps || 12,
-      strategy: (settings as any)?.strategy || (providerName.toLowerCase() === 'gemini' ? 'gemini' : 'stability'),
-      denoiseStrength: (settings as any)?.denoiseStrength ?? 0.4,
-      qualityThreshold: (settings as any)?.qualityThreshold ?? 0.92,
-      identityLock: (settings as any)?.identityLock !== false,
-      additionalContext: (settings as any)?.additionalContext,
+    // Read app settings for model defaults
+    let imageModel = 'gemini-2.0-flash-preview-image-generation';
+    let videoModel = 'veo-2.0-generate-001';
+    try {
+      const appSettings = await (prisma as any).appSettings?.findUnique({ where: { id: 1 } });
+      if (appSettings) {
+        imageModel = appSettings.geminiImageModel || imageModel;
+        videoModel = appSettings.geminiVideoModel || videoModel;
+      }
+    } catch { /* AppSettings table may not exist yet */ }
+
+    // Override with request-level settings if provided and valid
+    const requestedImageModel = (settings as any)?.imageModel;
+    const requestedVideoModel = (settings as any)?.videoModel;
+    if (requestedImageModel && ALLOWED_IMAGE_MODELS.includes(requestedImageModel)) {
+      imageModel = requestedImageModel;
+    }
+    if (requestedVideoModel && ALLOWED_VIDEO_MODELS.includes(requestedVideoModel)) {
+      videoModel = requestedVideoModel;
+    }
+
+    // Forward to generate-direct handler by constructing an internal fetch
+    // This keeps a single implementation point (generate-direct) while allowing
+    // the /api/v1/generate route to remain the stable, documented API surface.
+    const internalUrl = new URL('/api/v1/generate-direct', req.url);
+
+    const forwardBody = {
+      jobId: Number(jobId),
+      prompt,
+      settings: {
+        ...((settings as any) || {}),
+        imageModel,
+        videoModel,
+      },
     };
 
-    // Enqueue
-    const originalAsset = await prisma.asset.findFirst({
-      where: { jobId: job.id, type: 'original' }
+    // Copy auth cookies for the internal request
+    const forwardRes = await fetch(internalUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: req.headers.get('Cookie') || '',
+        'x-forwarded-for': req.headers.get('x-forwarded-for') || '',
+      },
+      body: JSON.stringify(forwardBody),
     });
 
-    await generateQueue.add('process-generation', {
-      jobId: job.id,
-      prompt,
-      provider: providerName,
-      apiKey,
-      settings: catalogSettings,
-      refImagePath: originalAsset?.path,
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'Identity-preserving generation started',
-      jobId: job.id,
-      provider: providerName,
-      strategy: catalogSettings.strategy,
-      qualityThreshold: catalogSettings.qualityThreshold,
-      colorCount: catalogSettings.colors.length || catalogSettings.cols * catalogSettings.rows,
-    });
+    const responseData = await forwardRes.json();
+    return NextResponse.json(responseData, { status: forwardRes.status });
   } catch (err: any) {
-    console.error('Generate API Error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    console.error('[Generate] Error:', err.message);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

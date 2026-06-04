@@ -11,6 +11,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
 enum JobStatus {
   PENDING
   PROCESSING
@@ -30,6 +32,7 @@ enum IterationStatus {
 enum JobType {
   CATALOG_VARIANTS
   LIFESTYLE_SCENES
+  VIDEO_GENERATION
 }
 
 enum Role {
@@ -37,29 +40,33 @@ enum Role {
   USER
 }
 
+// ── Gemini-first generation strategy enum ─────────────────────────────────────
+// Stability AI strategies have been removed. All generation uses Gemini APIs.
 enum GenerationStrategy {
-  STABILITY_SEARCH_REPLACE
-  SDXL_CONTROLNET
-  FLUX_REDUX
-  HUE_SHIFT
-  GPT_IMAGE_EDIT
+  GEMINI_IMAGE_EDIT     // gemini-2.0-flash-preview-image-generation (color variants)
+  GEMINI_LIFESTYLE      // gemini-2.0-flash (lifestyle scene generation)
+  VEO_VIDEO             // veo-3.1-generate-preview (product showcase video)
+  GEMINI_SPIN           // gemini-2.0-flash (360° spin frames)
+  HUE_SHIFT             // Pure local HSL shift (no AI, free, for testing only)
 }
 
+// ── Models ────────────────────────────────────────────────────────────────────
+
 model User {
-  id            Int             @id @default(autoincrement())
-  email         String          @unique
-  passwordHash  String?
-  twoFactorEnabled Boolean      @default(false)
-  name          String?
-  emailVerified DateTime?
-  image         String?
-  role          Role            @default(USER)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  jobs          Job[]
-  passwordResets PasswordReset[]
-  accounts      Account[]
-  sessions      Session[]
+  id               Int             @id @default(autoincrement())
+  email            String          @unique
+  passwordHash     String?
+  twoFactorEnabled Boolean         @default(false)
+  name             String?
+  emailVerified    DateTime?
+  image            String?
+  role             Role            @default(USER)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  jobs             Job[]
+  passwordResets   PasswordReset[]
+  accounts         Account[]
+  sessions         Session[]
 }
 
 model Job {
@@ -91,13 +98,17 @@ model Job {
   generationConfig GenerationConfig?
   providerId     Int?
   provider       AiProvider?       @relation(fields: [providerId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([userId, status])
 }
 
 model Asset {
   id               Int      @id @default(autoincrement())
-  type             String
+  type             String   // 'original' | 'variant' | 'grid' | 'video' | 'spin' | 'spin-frame' | 'crop' | 'lifestyle' | 'processed'
   path             String
-  status           String
+  status           String   // 'pending' | 'done' | 'approved' | 'error'
   clipScore        Float?
   dinov2Score      Float?
   ssimScore        Float?
@@ -107,50 +118,71 @@ model Asset {
   versions         Asset[]  @relation("AssetVersions")
   jobId            Int
   job              Job      @relation(fields: [jobId], references: [id])
+
+  // Performance: queries like findFirst({ where: { jobId, type } }) are very common
+  @@index([jobId])
+  @@index([jobId, type])
+  @@index([jobId, type, status])
 }
 
 model PromptTemplate {
-  id        Int      @id @default(autoincrement())
-  name      String
-  content   String
-  job       Job?
+  id      Int    @id @default(autoincrement())
+  name    String
+  content String
+  job     Job?
 }
 
 model Generation {
-  id       Int      @id @default(autoincrement())
+  id       Int     @id @default(autoincrement())
   metadata Json?
-  jobId    Int      @unique
-  job      Job      @relation(fields: [jobId], references: [id])
+  jobId    Int     @unique
+  job      Job     @relation(fields: [jobId], references: [id])
 }
 
+// ── Gemini-first GenerationConfig ─────────────────────────────────────────────
+// Replaced Stability AI fields with Gemini-specific configuration.
 model GenerationConfig {
   id                Int                @id @default(autoincrement())
   jobId             Int                @unique
   job               Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  strategy          GenerationStrategy @default(STABILITY_SEARCH_REPLACE)
-  denoiseStrength   Float              @default(0.4)
-  controlNetEnabled Boolean            @default(true)
-  identityLock      Boolean            @default(true)
-  seed              Int?
-  colors            Json
+  // Gemini model selection
+  strategy          GenerationStrategy @default(GEMINI_IMAGE_EDIT)
+  geminiImageModel  String             @default("gemini-2.0-flash-preview-image-generation")
+  geminiVideoModel  String             @default("veo-2.0-generate-001")
+  // Grid configuration
+  colors            Json               @default("[]")
   gridCols          Int                @default(4)
   gridRows          Int                @default(3)
+  // Video configuration
+  videoEnabled      Boolean            @default(false)
+  videoPrompt       String?
+  // Spin configuration
+  spinEnabled       Boolean            @default(false)
   spinFrames        Int                @default(36)
-  qualityThreshold  Float              @default(0.92)
+  fps               Int                @default(12)
+  // Post-processing
+  cropsEnabled      Boolean            @default(true)
+  lifestyleEnabled  Boolean            @default(false)
+  // Files API cache (P2.8) — avoids re-uploading reference image to Google on every run
+  filesApiUri       String?            // Cached Google Files API URI
+  filesApiExpiry    DateTime?          // URI expires after 48h
+  // Metadata
   createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @default(now()) @updatedAt
 }
 
+
 model Iteration {
-  id         Int             @id @default(autoincrement())
-  jobId      Int
-  job        Job             @relation(fields: [jobId], references: [id])
-  prompt     String
-  critique   String?
-  status     IterationStatus @default(RUNNING)
-  assetPath  String?
-  clipScore  Float?
+  id             Int             @id @default(autoincrement())
+  jobId          Int
+  job            Job             @relation(fields: [jobId], references: [id])
+  prompt         String
+  critique       String?
+  status         IterationStatus @default(RUNNING)
+  assetPath      String?
+  clipScore      Float?
   aggregateScore Float?
-  createdAt  DateTime        @default(now())
+  createdAt      DateTime        @default(now())
 }
 
 model JobEvent {
@@ -161,6 +193,8 @@ model JobEvent {
   message   String?
   metadata  Json?
   timestamp DateTime @default(now())
+
+  @@index([jobId])
 }
 
 model PasswordReset {
@@ -172,11 +206,23 @@ model PasswordReset {
 }
 
 model AiProvider {
-  id      Int    @id @default(autoincrement())
-  name    String @unique
+  id      Int     @id @default(autoincrement())
+  name    String  @unique
+  // API key stored AES-256-GCM encrypted at rest (see lib/crypto.ts)
+  // Format: "enc:<iv_hex>:<authTag_hex>:<ciphertext_hex>" or plain text for legacy/mock
   apiKey  String
   default Boolean @default(false)
   jobs    Job[]
+}
+
+// ── Application settings (replaces the __app_settings__ AiProvider hack) ─────
+model AppSettings {
+  id               Int    @id @default(1) // singleton
+  geminiImageModel String @default("gemini-2.0-flash-preview-image-generation")
+  geminiVideoModel String @default("veo-2.0-generate-001")
+  defaultGridCols  Int    @default(4)
+  defaultGridRows  Int    @default(3)
+  updatedAt        DateTime @updatedAt
 }
 
 model Account {
@@ -185,12 +231,12 @@ model Account {
   type               String
   provider           String
   providerAccountId  String
-  refresh_token      String?  @db.Text
-  access_token       String?  @db.Text
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
   expires_at         Int?
   token_type         String?
   scope              String?
-  id_token           String?  @db.Text
+  id_token           String? @db.Text
   session_state      String?
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@unique([provider, providerAccountId])

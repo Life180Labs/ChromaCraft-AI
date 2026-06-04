@@ -5,6 +5,7 @@ import fs from 'fs';
 import pino from 'pino';
 import dotenv from 'dotenv';
 import { AgentController, GenerationParams, GenerationSettings, VariantResult, generateCollaterals, runProcess } from './orchestrator';
+import { veoVideoWorker } from './veoWorker';
 
 let envPath = path.resolve(process.cwd(), '.env');
 if (!fs.existsSync(envPath)) envPath = path.resolve(process.cwd(), '../../.env');
@@ -295,7 +296,7 @@ const validateWorker = new Worker('validate', async (job: BullJob<ValidateJobDat
 }, { connection: redisConfig as any, concurrency: 4 });
 
 // --- Event Handlers ---
-[uploadWorker, generateWorker, processingWorker, validateWorker].forEach((w) => {
+[uploadWorker, generateWorker, processingWorker, validateWorker, veoVideoWorker].forEach((w) => {
   w.on('error', (err) => logger.error({ err: err.message }, 'Worker error'));
   w.on('failed', async (bullJob, err) => {
     logger.error({ jobId: bullJob?.id, err: err.message }, 'Job failed');
@@ -319,6 +320,7 @@ process.on('SIGTERM', async () => {
   await Promise.all([
     uploadWorker.close(), generateWorker.close(),
     processingWorker.close(), validateWorker.close(),
+    veoVideoWorker.close(),
   ]);
   await processingQueue.close();
   await dlq.close();

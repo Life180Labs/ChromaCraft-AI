@@ -113,6 +113,8 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
   }, [industry, modelName, targetAudience, targetMarket, targetPurpose, additionalContext]);
 
   // Polling effect for active job status during generation
+  // Uses /api/v1/jobs/:id (single job fetch) instead of /api/v1/jobs (all jobs)
+  // to avoid fetching the entire job list every 1.5s — ~95% reduction in polling payload.
   useEffect(() => {
     if (activeTab !== 'generate' && activeTab !== 'review') return;
     if (!selectedJob) return;
@@ -120,14 +122,13 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('/api/v1/jobs');
+        const res = await fetch(`/api/v1/jobs/${selectedJob.id}`);
         if (res.ok) {
-          const data = await res.json();
-          const safeData = Array.isArray(data) ? data : [];
-          setJobs(safeData);
-          const currentJob = safeData.find((j) => j.id === selectedJob.id);
-          if (currentJob) {
+          const currentJob = await res.json();
+          if (currentJob?.id) {
             setSelectedJob(currentJob);
+            // Update the job in the jobs list too
+            setJobs(prev => prev.map(j => j.id === currentJob.id ? currentJob : j));
             if (currentJob.status !== 'PENDING' && currentJob.status !== 'PROCESSING') {
               clearInterval(interval);
             }
@@ -136,10 +137,11 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
       } catch (e) {
         console.error('Polling error:', e);
       }
-    }, 1500);
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [activeTab, selectedJob]);
+  }, [activeTab, selectedJob?.id, selectedJob?.status]);
+
 
   // ── API Handlers ──
 
@@ -148,6 +150,7 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
       const res = await fetch('/api/v1/jobs');
       if (res.ok) {
         const data = await res.json();
+        // API now returns paginated list — data is the jobs array directly
         setJobs(Array.isArray(data) ? data : []);
       } else {
         setJobs([]);
@@ -258,13 +261,22 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
 
       setLoading(false);
 
-      // Fetch jobs to get latest state
-      const updatedJobsRes = await fetch('/api/v1/jobs');
-      if (updatedJobsRes.ok) {
-        const updatedJobs = await updatedJobsRes.json();
-        setJobs(updatedJobs);
-        const currentJob = updatedJobs.find((j: Job) => j.id === job.id);
-        if (currentJob) setSelectedJob(currentJob);
+      // Fetch single job (efficient — avoids loading all jobs just to find this one)
+      const freshJobRes = await fetch(`/api/v1/jobs/${job.id}`);
+      if (freshJobRes.ok) {
+        const freshJob = await freshJobRes.json();
+        if (freshJob?.id) {
+          setSelectedJob(freshJob);
+          setJobs(prev => {
+            const exists = prev.some(j => j.id === freshJob.id);
+            return exists
+              ? prev.map(j => j.id === freshJob.id ? freshJob : j)
+              : [freshJob, ...prev];
+          });
+        }
+      } else {
+        // Fallback: refresh entire list
+        await fetchJobs();
       }
 
       // Navigate to generate tab so user can review prompt and trigger
@@ -358,6 +370,20 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
     } catch (e) { console.error('Export URL generation failed:', e); }
   };
 
+  // When selecting a job from the sidebar/list, fetch the full job details
+  // (the list API returns only summary asset data to keep list responses small)
+  const handleSelectJob = async (job: Job) => {
+    // Set immediately so UI responds without waiting
+    setSelectedJob(job);
+    try {
+      const res = await fetch(`/api/v1/jobs/${job.id}`);
+      if (res.ok) {
+        const fullJob = await res.json();
+        if (fullJob?.id) setSelectedJob(fullJob);
+      }
+    } catch { /* Keep the summary version if full fetch fails */ }
+  };
+
   // ── Render ──
 
   if (authStatus === 'unauthenticated') {
@@ -378,7 +404,7 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
   const renderTab = () => {
     switch (activeTab) {
       case 'home':
-        return <DashboardHome userName={userName} jobs={jobs} onNavigate={setActiveTab} onSelectJob={setSelectedJob} onNewJob={handleStartNewJob} />;
+        return <DashboardHome userName={userName} jobs={jobs} onNavigate={setActiveTab} onSelectJob={handleSelectJob} onNewJob={handleStartNewJob} />;
       case 'setup':
         return (
           <UploadSetup
@@ -429,7 +455,7 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
           <GeneratePanel
             jobs={jobs}
             selectedJob={selectedJob}
-            onSelectJob={setSelectedJob}
+            onSelectJob={handleSelectJob}
             promptText={promptText}
             onPromptChange={setPromptText}
             providers={providers}
@@ -441,11 +467,11 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
           />
         );
       case 'review':
-        return <ReviewQA jobs={jobs} selectedJob={selectedJob} onSelectJob={setSelectedJob} onQAReview={handleQAReview} onNavigate={setActiveTab} />;
+        return <ReviewQA jobs={jobs} selectedJob={selectedJob} onSelectJob={handleSelectJob} onQAReview={handleQAReview} onNavigate={setActiveTab} />;
       case 'deliver':
-        return <DeliverExport jobs={jobs} selectedJob={selectedJob} onSelectJob={setSelectedJob} exportUrl={exportUrl} onExportUrl={handleExportUrl} />;
+        return <DeliverExport jobs={jobs} selectedJob={selectedJob} onSelectJob={handleSelectJob} exportUrl={exportUrl} onExportUrl={handleExportUrl} />;
       case 'history':
-        return <JobHistory jobs={jobs} onRefresh={fetchJobs} onSelectJob={setSelectedJob} />;
+        return <JobHistory jobs={jobs} onRefresh={fetchJobs} onSelectJob={handleSelectJob} />;
       case 'profile':
         return (
           <ProfileSettings

@@ -35,12 +35,15 @@ export const processingQueue = new Queue('processing', { connection });
 export const qaQueue = new Queue('qa', { connection });
 export const validateQueue = new Queue('validate', { connection });
 export const exportQueue = new Queue('export', { connection });
+export const veoVideoQueue = new Queue('veo-video', { connection });
 export const dlq = new Queue('dead-letter', { connection });
 
 // Queue events for real-time progress
 export const uploadEvents = new QueueEvents('upload', { connection });
 export const generateEvents = new QueueEvents('generate', { connection });
 export const processingEvents = new QueueEvents('processing', { connection });
+export const veoVideoEvents = new QueueEvents('veo-video', { connection });
+
 
 // Worker factory with DLQ and retry support
 export const createResilientWorker = (

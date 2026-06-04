@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   TbLoader, TbCheck, TbAlertCircle, TbPalette, TbPhoto,
   TbChevronRight, TbX, TbSparkles, TbPlayerPlay, TbBrandGoogle,
@@ -48,13 +48,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
   const [genSuccess, setGenSuccess] = useState('');
-  const [colorCards, setColorCards] = useState<ColorCard[]>([]);
   const [imageModel, setImageModel] = useState('gemini-2.0-flash-preview-image-generation');
   const [videoModel, setVideoModel] = useState('veo-2.0-generate-001');
-  const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
 
   // Prompt preview edit
   const [showPromptEdit, setShowPromptEdit] = useState(false);
+
 
   const metadata = selectedJob?.generation?.metadata || {};
   const configuredColors: string[] = metadata.colors || Object.keys(COLOR_HEX);
@@ -71,40 +70,80 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
       .catch(() => {});
   }, []);
 
-  // Sync color cards from job assets
-  useEffect(() => {
-    if (!selectedJob) { setColorCards([]); return; }
-    const cards: ColorCard[] = configuredColors.map(name => {
+  // Color cards: derived via useMemo from selectedJob.assets
+  // IMPORTANT: This was previously a useState+useEffect — which caused the navigation bug
+  // where returning to the Generate tab showed stale/extra cards. Now it is always
+  // computed from the current selectedJob and can never be "stale" state.
+  const colorCards = useMemo<ColorCard[]>(() => {
+    if (!selectedJob) return [];
+    return configuredColors.map(name => {
       const safeSlug = name.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '').toLowerCase();
       const asset = selectedJob.assets?.find(a =>
         (a.type === 'variant' || a.type === 'processed') &&
         (a.path.toLowerCase().includes(`raw_${safeSlug}`) || a.path.toLowerCase().includes(`_${safeSlug}.png`))
       );
-      const status: ColorStatus = asset
-        ? (asset.status === 'done' || asset.status === 'approved' || asset.status === 'pending' ? 'done' : 'failed')
-        : (selectedJob.status === 'COMPLETED' || selectedJob.status === 'FAILED' ? 'queued' : 'queued');
+      let status: ColorStatus = 'queued';
+      if (asset) {
+        status = (asset.status === 'done' || asset.status === 'approved' || asset.status === 'pending') ? 'done' : 'failed';
+      }
       return { name, status, assetId: asset?.id };
     });
-    setColorCards(cards);
-  }, [selectedJob]);
+  }, [selectedJob, selectedJob?.assets, configuredColors.join(',')]);
 
+  // Generating animation state (overlays on top of the memoized cards during API call)
+  const [generatingColors, setGeneratingColors] = useState<Set<string>>(new Set());
+  // Per-color retry state
+  const [retryingColors, setRetryingColors] = useState<Set<string>>(new Set());
+
+  // Retry a single failed color
+  const handleRetryColor = async (colorName: string) => {
+    if (!selectedJob || retryingColors.has(colorName)) return;
+    setRetryingColors(prev => new Set(prev).add(colorName));
+    try {
+      const res = await fetch('/api/v1/generate-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: selectedJob.id,
+          prompt: promptText,
+          settings: { ...metadata, colors: [colorName], imageModel, videoModel },
+        }),
+      });
+      if (res.ok) {
+        // Refresh job to get updated assets
+        const jobRes = await fetch(`/api/v1/jobs/${selectedJob.id}`);
+        if (jobRes.ok) {
+          const updatedJob = await jobRes.json();
+          if (updatedJob?.id) onSelectJob(updatedJob);
+        }
+      }
+    } catch (err: any) {
+      console.error('Retry failed:', err.message);
+    } finally {
+      setRetryingColors(prev => { const s = new Set(prev); s.delete(colorName); return s; });
+    }
+  };
   const handleGenerate = async () => {
     if (!selectedJob) return;
     setIsGenerating(true);
     setGenError('');
     setGenSuccess('');
 
-    // Mark all as queued
-    setColorCards(configuredColors.map(name => ({ name, status: 'queued' })));
+    // Track generating colors visually using a Set overlay
+    // (actual card status comes from memoized selectedJob.assets)
+    const allColors = new Set(configuredColors);
+    setGeneratingColors(allColors);
 
-    // Simulate per-color "generating" UI (since the real API is one round-trip)
-    // Show each color as "generating" sequentially while API runs
+    // Sequentially animate colors to "generating" state
+    let idx = 0;
     const animInterval = setInterval(() => {
-      setColorCards(prev => {
-        const firstQueued = prev.findIndex(c => c.status === 'queued');
-        if (firstQueued === -1) { clearInterval(animInterval); return prev; }
-        return prev.map((c, i) => i === firstQueued ? { ...c, status: 'generating' } : c);
-      });
+      if (idx < configuredColors.length) {
+        idx++;
+        // The animation just tracks which have been "started" — actual done state
+        // comes from the real selectedJob.assets after fetch completes
+      } else {
+        clearInterval(animInterval);
+      }
     }, 800);
 
     try {
@@ -113,7 +152,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         colors: configuredColors,
         imageModel,
         videoModel,
-        // Ensure videoPrompt is always explicitly included
         videoPrompt: metadata.videoPrompt || 'Cinematic showcase of the product under dynamic studio lighting',
       };
 
@@ -128,21 +166,20 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
       });
 
       clearInterval(animInterval);
+      setGeneratingColors(new Set());
 
       const data = await res.json();
 
       if (!res.ok) {
         setGenError(data.error || 'Generation failed');
-        setColorCards(prev => prev.map(c => ({ ...c, status: c.status === 'generating' ? 'failed' : c.status })));
         return;
       }
 
-      // Refresh job to get new assets
-      const jobsRes = await fetch('/api/v1/jobs');
-      if (jobsRes.ok) {
-        const updatedJobs = await jobsRes.json();
-        const updatedJob = updatedJobs.find((j: Job) => j.id === selectedJob.id);
-        if (updatedJob) onSelectJob(updatedJob);
+      // Refresh single job to get new assets (efficient — not all jobs)
+      const jobRes = await fetch(`/api/v1/jobs/${selectedJob.id}`);
+      if (jobRes.ok) {
+        const updatedJob = await jobRes.json();
+        if (updatedJob?.id) onSelectJob(updatedJob);
       }
 
       setGenSuccess(`✓ Generated ${data.generated}/${data.total} color variants. Review your results in the Review tab.`);
@@ -151,14 +188,19 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
       }
       // Auto-navigate to review tab after successful generation
       onNavigate?.('review');
-      onStartGeneration();
     } catch (err: any) {
       clearInterval(animInterval);
+      setGeneratingColors(new Set());
       setGenError(err.message || 'Generation failed');
-      setColorCards(prev => prev.map(c => ({ ...c, status: 'failed' as ColorStatus })));
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  // Resolve effective status for a card: overlay 'generating' if API call is in progress
+  const getEffectiveStatus = (card: ColorCard): ColorStatus => {
+    if (isGenerating && generatingColors.has(card.name)) return 'generating';
+    return card.status;
   };
 
   const getStatusIcon = (status: ColorStatus) => {
@@ -178,16 +220,17 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const gridAsset = selectedJob?.assets?.find(a => a.type === 'grid');
   const spinAsset = selectedJob?.assets?.find(a => a.type === 'spin');
 
-  const gridStatus = gridAsset 
-    ? 'done' 
+  // Video status: show 'pending' badge if video asset exists but is still processing
+  const gridStatus = gridAsset
+    ? 'done'
     : (isGenerating ? 'generating' : (selectedJob?.status === 'FAILED' ? 'failed' : 'queued'));
 
-  const videoStatus = videoAsset 
-    ? 'done' 
+  const videoStatus = videoAsset
+    ? (videoAsset.status === 'pending' ? 'generating' : 'done')
     : (isGenerating ? 'generating' : (selectedJob?.status === 'FAILED' ? 'failed' : 'queued'));
 
-  const spinStatus = spinAsset 
-    ? 'done' 
+  const spinStatus = spinAsset
+    ? 'done'
     : (isGenerating ? 'generating' : (selectedJob?.status === 'FAILED' ? 'failed' : 'queued'));
 
   return (
@@ -226,12 +269,42 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
       </div>
 
       {!selectedJob ? (
-        <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
-          <TbPhoto size={32} style={{ color: 'var(--tx4)', margin: '0 auto 12px', display: 'block' }} />
-          <p style={{ color: 'var(--tx2)' }}>Select a job from the Setup tab to begin generation.</p>
-          <Button variant="primary" style={{ marginTop: 12 }} onClick={() => onNavigate?.('setup')}>
-            Go to Setup <TbChevronRight size={14} style={{ marginLeft: 4 }} />
-          </Button>
+        <div className="card" style={{ padding: '48px 32px', textAlign: 'center', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--acc) 0%, #7c3aed 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 20px',
+          }}>
+            <TbPalette size={32} style={{ color: '#fff' }} />
+          </div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--tx)', marginBottom: 8 }}>
+            No Job Selected
+          </h3>
+          <p style={{ color: 'var(--tx2)', fontSize: 13, lineHeight: 1.7, marginBottom: 24 }}>
+            Upload a product image in the Setup tab to begin. ChromaCraft will generate
+            color variants, a grid collage, and a showcase video — all powered by Gemini AI.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              id="go-to-setup-btn"
+              className="btn btn-primary"
+              onClick={() => onNavigate?.('setup')}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <TbPhoto size={15} /> Upload Product Image
+            </button>
+            {safeJobs.length > 0 && (
+              <button
+                id="select-job-from-history-btn"
+                className="btn btn-ghost"
+                onClick={() => onNavigate?.('history')}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                View Job History <TbChevronRight size={14} />
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
@@ -289,15 +362,16 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             >
               {colorCards.map((card, idx) => {
                 const hex = COLOR_HEX[card.name] || '#888';
+                const effectiveStatus = getEffectiveStatus(card);
                 const asset = card.assetId
                   ? selectedJob.assets?.find(a => a.id === card.assetId)
                   : null;
-                const showImage = card.status === 'done' && asset && !failedImages.has(asset.id);
+                const showImage = card.status === 'done' && asset;
 
                 return (
                   <div
                     key={idx}
-                    className={`variant-cell ${card.status === 'failed' ? 'error' : card.status === 'done' ? 'done' : card.status === 'generating' ? 'generating' : 'pending'}`}
+                    className={`variant-cell ${effectiveStatus === 'failed' ? 'error' : effectiveStatus === 'done' ? 'done' : effectiveStatus === 'generating' ? 'generating' : 'pending'}`}
                     style={{ position: 'relative', overflow: 'hidden' }}
                   >
                     <div className="vc-swatch" style={{ background: hex }} />
@@ -308,10 +382,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                             src={`/api/v1/assets?id=${asset!.id}`}
                             alt={card.name}
                             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4 }}
-                            onError={() => setFailedImages(prev => new Set(prev).add(asset!.id))}
                           />
                         </div>
-                      ) : card.status === 'generating' ? (
+                      ) : effectiveStatus === 'generating' ? (
                         <div style={{ height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <TbLoader className="spin" size={24} style={{ color: 'var(--acc)' }} />
                         </div>
@@ -322,13 +395,33 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                       )}
                       <div className="vc-label">{card.name}</div>
                       <div className="vc-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                        {getStatusIcon(card.status)}
-                        {card.status === 'done' ? 'Done' : card.status === 'failed' ? 'Failed' : card.status === 'generating' ? 'Generating…' : 'Queued'}
+                        {getStatusIcon(effectiveStatus)}
+                        {effectiveStatus === 'done' ? 'Done' : effectiveStatus === 'failed' ? 'Failed' : effectiveStatus === 'generating' ? 'Generating…' : 'Queued'}
                       </div>
+                      {/* Per-color retry button (P4.5) */}
+                      {effectiveStatus === 'failed' && !isGenerating && (
+                        <button
+                          id={`retry-color-${card.name.replace(/\s+/g, '-').toLowerCase()}`}
+                          onClick={() => handleRetryColor(card.name)}
+                          disabled={retryingColors.has(card.name)}
+                          style={{
+                            marginTop: 4, width: '100%', fontSize: 10, padding: '3px 0',
+                            background: 'var(--err)', color: '#fff', border: 'none',
+                            borderRadius: 4, cursor: 'pointer', opacity: retryingColors.has(card.name) ? 0.6 : 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                          }}
+                        >
+                          {retryingColors.has(card.name)
+                            ? <><TbLoader className="spin" size={10} /> Retrying…</>
+                            : '↺ Retry'
+                          }
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
               })}
+
 
               {/* Grid Collage Card */}
               <div
@@ -370,13 +463,18 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                 >
                   <div className="vc-swatch" style={{ background: '#7c3aed' }} />
                   <div className="vc-body">
-                    {videoAsset ? (
+                    {videoAsset && videoAsset.status === 'done' ? (
                       <div style={{ height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: 4 }}>
                         <video
                           src={`/api/v1/assets?id=${videoAsset.id}`}
                           autoPlay loop muted playsInline
                           style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4 }}
                         />
+                      </div>
+                    ) : videoAsset && videoAsset.status === 'pending' ? (
+                      <div style={{ height: 70, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                        <TbLoader className="spin" size={24} style={{ color: 'var(--acc)' }} />
+                        <span style={{ fontSize: 9, color: 'var(--tx3)', textAlign: 'center' }}>Rendering…</span>
                       </div>
                     ) : videoStatus === 'generating' ? (
                       <div style={{ height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -390,11 +488,15 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
                     <div className="vc-label">Showcase Video</div>
                     <div className="vc-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                       {getStatusIcon(videoStatus as ColorStatus)}
-                      {videoStatus === 'done' ? 'Done' : videoStatus === 'failed' ? 'Failed' : videoStatus === 'generating' ? 'Generating…' : 'Queued'}
+                      {videoStatus === 'done' ? 'Done' :
+                       videoStatus === 'failed' ? 'Failed' :
+                       videoStatus === 'generating' ? (videoAsset?.status === 'pending' ? 'Rendering in background…' : 'Generating…') :
+                       'Queued'}
                     </div>
                   </div>
                 </div>
               )}
+
 
               {/* 360° Spin Card */}
               {(metadata.spinEnabled || spinAsset) && (

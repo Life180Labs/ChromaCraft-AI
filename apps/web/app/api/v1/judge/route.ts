@@ -5,6 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 
+const STORAGE_PATH = process.env.STORAGE_PATH || path.join(process.cwd(), '..', '..', 'storage');
+
 export interface JudgeRequest {
   imagePath: string;
   goal: string;
@@ -42,11 +44,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // ── SECURITY: Path traversal prevention ─────────────────────────────────
+    // Resolve and strictly validate the path stays within STORAGE_PATH.
     const resolvedPath = path.resolve(imagePath);
+    const resolvedStoragePath = path.resolve(STORAGE_PATH);
+
+    if (!resolvedPath.startsWith(resolvedStoragePath + path.sep) && resolvedPath !== resolvedStoragePath) {
+      return NextResponse.json(
+        { error: 'Access denied: path is outside storage boundary' },
+        { status: 403 },
+      );
+    }
+
     const fileExists = await fs.promises.stat(resolvedPath).then(() => true).catch(() => false);
     if (!fileExists) {
       return NextResponse.json(
-        { error: `Image not found at path: ${resolvedPath}` },
+        { error: 'Image not found' },
         { status: 404 },
       );
     }

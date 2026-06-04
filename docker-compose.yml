@@ -38,6 +38,11 @@ services:
       - DEVELOPMENT_MODE=true
       - STORAGE_PATH=/app/storage
       - QUALITY_THRESHOLD=0.92
+      # MinIO asset delivery (P3.5)
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_BUCKET=chromacraft
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
     ports:
       - "3000:3000"
     depends_on:
@@ -47,6 +52,11 @@ services:
         condition: service_healthy
     volumes:
       - ./storage:/app/storage
+      # Mount source code so Next.js dev server hot-reloads file changes
+      - ./apps/web/app:/app/app
+      - ./apps/web/components:/app/components
+      - ./apps/web/lib:/app/lib
+      - ./apps/web/prisma:/app/prisma
     command: npm run dev
 
   worker:
