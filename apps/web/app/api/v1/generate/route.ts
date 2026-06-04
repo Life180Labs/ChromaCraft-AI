@@ -23,12 +23,20 @@ import { decryptApiKey } from '../../../../lib/crypto';
 
 // ── Allowed model allowlists (must match generate-direct) ─────────────────────
 const ALLOWED_IMAGE_MODELS = [
-  'gemini-3.1-flash-image',
-  'gemini-3.1-flash',
-  'gemini-3.1-pro',
+  'gemini-3.5-flash',
+  'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
   'gemini-2.0-flash-preview-image-generation',
   'gemini-2.0-flash-exp-image-generation',
   'gemini-2.5-flash-preview-05-20',
+  'gemini-3.1-flash-image',
+  'gemini-3.1-flash',
+  'gemini-3.1-pro',
+  'gemini-3-pro-image',
   'imagen-3.0-generate-002',
   'gemini-1.5-flash',
   'gemini-1.5-pro',
@@ -95,8 +103,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Read app settings for model defaults
-    let imageModel = 'gemini-2.0-flash-preview-image-generation';
-    let videoModel = 'veo-2.0-generate-001';
+    let imageModel = 'gemini-3-pro-image';
+    let videoModel = 'veo-3.1-generate-preview';
     try {
       const appSettings = await (prisma as any).appSettings?.findUnique({ where: { id: 1 } });
       if (appSettings) {

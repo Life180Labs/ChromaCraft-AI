@@ -10,10 +10,13 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import time
-from io import BytesIO
+import io
+import random
+import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import PIL.Image
 from typing import Optional
 
 from PIL import Image
@@ -43,11 +46,20 @@ def _resolve_api_key(cli_key: str) -> str:
     return env_key if env_key else "none"
 
 
-def _identity_prompt(color: str, prompt: str) -> str:
-    """Append color change to the full prompt from orchestrator (includes identity, context, variations)."""
-    return f"{prompt} Change the color to {color}."
 
+def get_optimal_image_model(requested_model: str) -> str:
+    model_lower = requested_model.lower()
+    if "imagen" in model_lower: return requested_model
+    if "image-generation" in model_lower or "flash-image" in model_lower: return requested_model
+    if "3.1" in model_lower or "3.5" in model_lower: return "gemini-3-pro-image"
+    if "2.0" in model_lower or "2.5" in model_lower: return "gemini-3-pro-image"
+    return "gemini-3-pro-image"
 
+def get_optimal_video_model(requested_model: str) -> str:
+    model_lower = requested_model.lower()
+    if "veo" in model_lower: return requested_model
+    if "3.1" in model_lower or "3.5" in model_lower: return "veo-3.1-generate-preview"
+    return "veo-3.1-generate-preview"
 
 # Strategy 4: Google Gemini (Direct Generative Recoloring via ThreadPoolExecutor)
 # ---------------------------------------------------------------------------
@@ -64,7 +76,7 @@ def generate_gemini_multithread(
     """
     Direct Gemini recoloring strategy.
     Uploads base reference asset to Google File API once.
-    Fires concurrent worker threads to request variant images from gemini-2.0-flash-preview-image-generation.
+    Fires concurrent worker threads to request variant images from gemini-3-pro-image.
     Cleans up the uploaded file in a finally block.
     """
     if not ref_image_path or not os.path.isfile(ref_image_path):
@@ -80,19 +92,12 @@ def generate_gemini_multithread(
     except ImportError:
         raise ImportError("google-genai library is missing. Install using: pip install google-genai")
 
-    import io
-    import random
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     # Initialize Gemini client (once)
     client = genai.Client(api_key=resolved_key)
     
     # Initialize variables for the reference image
     uploaded_file = None
     orig_width, orig_height = image_size
-    
-    if not ref_image_path or not os.path.isfile(ref_image_path):
-        raise RuntimeError(f"Reference image is missing or invalid: {ref_image_path}")
 
     try:
         original_image = Image.open(ref_image_path)
@@ -105,7 +110,6 @@ def generate_gemini_multithread(
     # Cache the Files API URI and expiry in the CACHED_FILE_URI / CACHED_FILE_EXPIRY
     # env vars (set by the worker before invoking this script).
     # Google Files API files expire after 48 hours — we use a 47h TTL for safety.
-    import datetime
     cached_uri = os.environ.get("CACHED_FILE_URI", "")
     cached_expiry_str = os.environ.get("CACHED_FILE_EXPIRY", "")
     cached_mime = os.environ.get("CACHED_FILE_MIME", "image/png")
@@ -136,15 +140,17 @@ def generate_gemini_multithread(
                 "uri": file_uri,
                 "mime": file_mime,
                 "expiry": expiry_dt.isoformat(),
-            }), file=sys.stdout)
+            }), file=sys.stderr)
             print(f"[Cloud] Asset staged. URI: {file_uri}", file=sys.stderr)
         except Exception as e:
             raise RuntimeError(f"Failed to stage reference image. An image is strictly required: {e}")
 
-    # Use the requested model
-    model_id = os.environ.get("GEMINI_MODEL_ID", "gemini-3.1-flash-image")
+    # Use the requested model mapped natively to a multimodal equivalent
+    raw_model_id = os.environ.get("GEMINI_MODEL_ID", "gemini-3-pro-image")
+    resolved_model_id = get_optimal_image_model(raw_model_id)
 
     def worker_generate_variant(color: str, max_retries: int = 3) -> tuple[str, Optional[str]]:
+        local_model_id = resolved_model_id
         worker_prompt = prompt.replace("[COLOR]", color).replace("[color]", color) if prompt else f"Modify the color to be {color}. Keep all other details identical."
         
         contents = [{
@@ -161,17 +167,35 @@ def generate_gemini_multithread(
                 
                 # Configure modalities for image generation
                 config_kwargs = {}
-                if "image" in model_id.lower() or "preview" in model_id.lower():
-                    config_kwargs["response_modalities"] = ["IMAGE"]
+                config_kwargs["response_modalities"] = ["TEXT", "IMAGE"]
                 
-                response = client.models.generate_content(
-                    model=model_id,
-                    contents=contents,
-                    config=config_kwargs
-                )
+                try:
+                    response = client.models.generate_content(
+                        model=local_model_id,
+                        contents=contents,
+                        config=config_kwargs
+                    )
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if local_model_id != "gemini-3-pro-image" and any(x in err_str for x in ["404", "not found", "not supported", "unsupported", "invalid", "modality", "method"]):
+                        print(f"   ⚠️ [Thread {color}] Model '{local_model_id}' failed: {e}. Falling back to 'gemini-3-pro-image'.", file=sys.stderr)
+                        local_model_id = "gemini-3-pro-image"
+                        response = client.models.generate_content(
+                            model=local_model_id,
+                            contents=contents,
+                            config=config_kwargs
+                        )
+                    else:
+                        raise e
                 
-                for part in response.parts:
+                if not response.candidates:
+                    print(f"   ⚠️ [Thread {color}] No candidates in response (possible safety block).", file=sys.stderr)
+                    continue
+
+                has_image = False
+                for part in (response.parts or []):
                     if part.inline_data:
+                        has_image = True
                         img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGBA")
                         
                         # Handle dimension normalization if required
@@ -183,7 +207,32 @@ def generate_gemini_multithread(
                         print(f"   ✅ [Thread {color}] Success. Saved to {save_path}", file=sys.stderr)
                         return color, save_path
                 
-                print(f"   ⚠️ [Thread {color}] Warning: Empty response parts or no inline image data.", file=sys.stderr)
+                if not has_image:
+                    print(f"   ⚠️ [Thread {color}] Warning: No inline image data in response.", file=sys.stderr)
+                    if local_model_id != "gemini-3-pro-image":
+                        print(f"   ⚠️ [Thread {color}] Model '{local_model_id}' did not return image data. Falling back to 'gemini-3-pro-image'.", file=sys.stderr)
+                        local_model_id = "gemini-3-pro-image"
+                        try:
+                            print(f"   -> [Thread {color}] Retrying with fallback model 'gemini-3-pro-image'...", file=sys.stderr)
+                            response = client.models.generate_content(
+                                model=local_model_id,
+                                contents=contents,
+                                config=config_kwargs
+                            )
+                            if not response.candidates:
+                                print(f"   ⚠️ [Thread {color}] No candidates in response (possible safety block).", file=sys.stderr)
+                                continue
+                            for part in (response.parts or []):
+                                if part.inline_data:
+                                    img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGBA")
+                                    if img.size != (orig_width, orig_height):
+                                        img = img.resize((orig_width, orig_height), Image.Resampling.LANCZOS)
+                                    save_path = os.path.join(out_dir, raw_filename(color))
+                                    img.save(save_path, "PNG")
+                                    print(f"   ✅ [Thread {color}] Success with fallback. Saved to {save_path}", file=sys.stderr)
+                                    return color, save_path
+                        except Exception as fallback_err:
+                            print(f"   ❌ [Thread {color}] Fallback model also failed: {fallback_err}", file=sys.stderr)
             except Exception as e:
                 error_msg = str(e).lower()
                 if any(x in error_msg for x in ["429", "quota", "rate limit", "resource_exhausted"]):
@@ -220,7 +269,7 @@ def generate_gemini_multithread(
                 print(f"[Cloud] Warning: Could not cleanly delete cloud file: {e}", file=sys.stderr)
                 
     # Add Python grid collage generation if running standalone (fallback if sharp is unavailable)
-    if results and len(results) > 0:
+    if results:
         print("\n[System] Assembling the Production Grid...", file=sys.stderr)
         try:
             grid_cols = min(3, len(colors))
@@ -279,20 +328,23 @@ def generate_veo_video(prompt: str, ref_image_path: str, out_path: str, api_key:
     print(f"[Veo] Starting Veo 3.1 video generation with image: {ref_image_path}...", file=sys.stderr)
     
     # Load image for Veo
-    import PIL.Image
+    # Load image for Veo
     try:
         image = PIL.Image.open(ref_image_path)
     except Exception as e:
         raise RuntimeError(f"Failed to open reference image: {e}")
 
     try:
+        raw_video_model = os.environ.get("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
+        video_model = get_optimal_video_model(raw_video_model)
+
         operation = client.models.generate_videos(
-            model="veo-3.1-generate-preview",
+            model=video_model,
             prompt=prompt or "Cinematic panning shot of the product",
             image=image,
         )
         
-        while not operation.done:
+        while not operation.done():
             print("[Veo] Waiting for video generation to complete...", file=sys.stderr)
             time.sleep(10)
             operation = client.operations.get(operation)
@@ -356,16 +408,19 @@ def task_generate(args: argparse.Namespace, json_mode: bool) -> int:
             ref_image_path=getattr(args, "refImage", None),
             image_size=(w, h),
         )
+        any_failed = False
         for color in colors:
             if color in results:
                 _emit_success(results[color], f"color={color},strategy={strategy}", json_mode)
             else:
+                any_failed = True
                 _emit_error(f"Gemini generation failed for color {color}", json_mode, context=f"color={color},strategy={strategy}")
         if "_grid" in results:
             _emit_success(results["_grid"], f"type=grid,strategy={strategy}", json_mode)
     except Exception as exc:
+        any_failed = True
         _emit_error(str(exc), json_mode, context=f"strategy={strategy}")
-    return 0
+    return 1 if any_failed else 0
 
 
 def task_video(args: argparse.Namespace, json_mode: bool) -> int:
@@ -424,20 +479,19 @@ def generate_lifestyle_scenes(
         print("[ERR] google-genai library missing, cannot run lifestyle generation", file=sys.stderr)
         return []
 
-    import io
     client = genai.Client(api_key=api_key)
     
     # Upload reference image
     print(f"[Lifestyle] Staging reference asset '{ref_image_path}' to Google File API...", file=sys.stderr)
+    uploaded_file = None
     try:
         uploaded_file = client.files.upload(file=ref_image_path)
     except Exception as e:
         print(f"[Lifestyle] Google Cloud upload failed: {e}", file=sys.stderr)
         return []
     
-    model_id = "gemini-2.0-flash-preview-image-generation"
-    if os.environ.get("GEMINI_MODEL_ID"):
-        model_id = os.environ.get("GEMINI_MODEL_ID")
+    raw_model_id = os.environ.get("GEMINI_MODEL_ID", "gemini-3-pro-image")
+    model_id = get_optimal_image_model(raw_model_id)
 
     scenes = [
         "Render the product placed naturally in a premium minimalist modern showcase setting.",
@@ -446,42 +500,50 @@ def generate_lifestyle_scenes(
     ]
     
     output_paths = []
-    for i, scene_base in enumerate(scenes):
-        prompt = (
-            f"{scene_base} The target audience is {target_audience} in the {target_market} market. "
-            f"The purpose is {target_purpose}. {additional_context or ''} "
-            f"Ensure the product from the source image remains completely unchanged and is integrated naturally into the background."
-        )
-        
-        contents = [{
-            "role": "user",
-            "parts": [
-                {"text": prompt},
-                {"file_data": {"file_uri": uploaded_file.uri, "mime_type": uploaded_file.mime_type}}
-            ]
-        }]
-        
-        try:
-            print(f"[Lifestyle] Requesting scene {i+1}...", file=sys.stderr)
-            response = client.models.generate_content(
-                model=model_id,
-                contents=contents
-            )
-            for part in response.parts:
-                if part.inline_data:
-                    img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGBA")
-                    save_path = os.path.join(out_dir, f"{prefix}_lifestyle_{i+1}.png")
-                    img.save(save_path, "PNG")
-                    output_paths.append(save_path)
-                    print(f"[Lifestyle] Saved scene {i+1} to {save_path}", file=sys.stderr)
-                    break
-        except Exception as e:
-            print(f"[Lifestyle] Failed to generate scene {i+1}: {e}", file=sys.stderr)
-            
     try:
-        client.files.delete(name=uploaded_file.name)
-    except Exception as e:
-        print(f"[Lifestyle] Warning: Could not cleanly delete cloud file: {e}", file=sys.stderr)
+        for i, scene_base in enumerate(scenes):
+            prompt = (
+                f"{scene_base} The target audience is {target_audience} in the {target_market} market. "
+                f"The purpose is {target_purpose}. {additional_context or ''} "
+                f"Ensure the product from the source image remains completely unchanged and is integrated naturally into the background."
+            )
+            
+            contents = [{
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {"file_data": {"file_uri": uploaded_file.uri, "mime_type": uploaded_file.mime_type}}
+                ]
+            }]
+            
+            try:
+                print(f"[Lifestyle] Requesting scene {i+1}...", file=sys.stderr)
+                config_kwargs = {"response_modalities": ["TEXT", "IMAGE"]}
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=contents,
+                    config=config_kwargs,
+                )
+                if not response.candidates:
+                    print(f"[Lifestyle] No candidates in response (possible safety block).", file=sys.stderr)
+                    continue
+
+                for part in (response.parts or []):
+                    if part.inline_data:
+                        img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGBA")
+                        save_path = os.path.join(out_dir, f"{prefix}_lifestyle_{i+1}.png")
+                        img.save(save_path, "PNG")
+                        output_paths.append(save_path)
+                        print(f"[Lifestyle] Saved scene {i+1} to {save_path}", file=sys.stderr)
+                        break
+            except Exception as e:
+                print(f"[Lifestyle] Failed to generate scene {i+1}: {e}", file=sys.stderr)
+    finally:
+        if uploaded_file:
+            try:
+                client.files.delete(name=uploaded_file.name)
+            except Exception as e:
+                print(f"[Lifestyle] Warning: Could not cleanly delete cloud file: {e}", file=sys.stderr)
         
     return output_paths
 
@@ -548,9 +610,6 @@ def build_parser() -> argparse.ArgumentParser:
     # Default to gemini when running CLI manually
     p.add_argument("--strategy", default="gemini",
                    choices=["gemini"])
-    p.add_argument("--denoiseStrength", type=float, default=0.4)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--preservationStrength", type=float, default=0.7)
     return p
 
 

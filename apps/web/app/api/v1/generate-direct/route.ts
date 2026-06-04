@@ -13,12 +13,20 @@ const STORAGE_PATH = process.env.STORAGE_PATH || path.join(process.cwd(), '..', 
 
 // ── Allowed Gemini model allowlists ──────────────────────────────────────────
 const ALLOWED_IMAGE_MODELS = [
-  'gemini-3.1-flash-image',
-  'gemini-3.1-flash',
-  'gemini-3.1-pro',
+  'gemini-3.5-flash',
+  'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
   'gemini-2.0-flash-preview-image-generation',
   'gemini-2.0-flash-exp-image-generation',
   'gemini-2.5-flash-preview-05-20',
+  'gemini-3.1-flash-image',
+  'gemini-3.1-flash',
+  'gemini-3.1-pro',
+  'gemini-3-pro-image',
   'imagen-3.0-generate-002',
   'gemini-1.5-flash',
   'gemini-1.5-pro',
@@ -64,6 +72,33 @@ const GenerateDirectRequestSchema = z.object({
   settings: GenerateDirectSettingsSchema,
 });
 
+// ── Model Mapper Helpers ───────────────────────────────────────────────────────
+function getOptimalImageModel(requestedModel: string): string {
+  const modelLower = requestedModel.toLowerCase();
+  
+  if (modelLower.includes('imagen')) return requestedModel;
+  if (modelLower.includes('image-generation') || modelLower.includes('flash-image')) return requestedModel;
+  
+  if (modelLower.includes('3.1') || modelLower.includes('3.5')) {
+     return 'gemini-3-pro-image';
+  }
+  if (modelLower.includes('2.0') || modelLower.includes('2.5')) {
+     return 'gemini-3-pro-image';
+  }
+  
+  return 'gemini-3-pro-image';
+}
+
+function getOptimalVideoModel(requestedModel: string): string {
+  const modelLower = requestedModel.toLowerCase();
+  if (modelLower.includes('veo')) return requestedModel;
+  
+  if (modelLower.includes('3.1') || modelLower.includes('3.5')) {
+      return 'veo-3.1-generate-preview';
+  }
+  return 'veo-3.1-generate-preview';
+}
+
 // ── Security: Storage path boundary check ────────────────────────────────────
 function assertWithinStorage(filePath: string): void {
   const resolvedStorage = path.resolve(STORAGE_PATH);
@@ -83,7 +118,8 @@ async function callGeminiImageAPI(
   referenceImageMime: string,
   maxRetries: number = 3,
 ): Promise<Buffer | null> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  let apiModel = model;
+  const defaultModel = 'gemini-3-pro-image';
 
   const body = {
     contents: [
@@ -108,6 +144,7 @@ async function callGeminiImageAPI(
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -117,6 +154,23 @@ async function callGeminiImageAPI(
       if (!res.ok) {
         const errText = await res.text();
         const errLower = errText.toLowerCase();
+
+        // If the model is not found or is not supported for generateContent/IMAGE modality, fall back to default
+        if (
+          apiModel !== defaultModel &&
+          (res.status === 404 ||
+            res.status === 400 ||
+            errLower.includes('not found') ||
+            errLower.includes('not supported') ||
+            errLower.includes('unsupported') ||
+            errLower.includes('invalid') ||
+            errLower.includes('modality'))
+        ) {
+          console.warn(`[callGeminiImageAPI] Model "${apiModel}" failed with error: ${errText.slice(0, 200)}. Falling back to "${defaultModel}"...`);
+          apiModel = defaultModel;
+          attempt--;
+          continue;
+        }
 
         if (res.status === 429 || errLower.includes('quota') || errLower.includes('rate limit')) {
           if (attempt < maxRetries - 1) {
@@ -133,6 +187,9 @@ async function callGeminiImageAPI(
       const candidates = data?.candidates || [];
 
       for (const candidate of candidates) {
+        if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
+          console.warn(`   ⚠️ [API] Gemini finishReason: ${candidate.finishReason}. Safety/prompt details:`, JSON.stringify(candidate.safetyRatings || []));
+        }
         for (const part of candidate?.content?.parts || []) {
           if (part?.inlineData?.mimeType?.startsWith('image/')) {
             return Buffer.from(part.inlineData.data, 'base64');
@@ -140,14 +197,46 @@ async function callGeminiImageAPI(
         }
       }
 
-      console.warn(`   ⚠️ [API] Gemini returned no image data on attempt ${attempt + 1}`);
+      console.warn(`   ⚠️ [API] Gemini returned no image data on attempt ${attempt + 1}. Full payload:`, JSON.stringify(data));
+
+      // If no image was found and it's not the default model, fall back to default
+      if (apiModel !== defaultModel) {
+        console.warn(`[callGeminiImageAPI] Model "${apiModel}" did not return an image. Falling back to "${defaultModel}"...`);
+        apiModel = defaultModel;
+        attempt--;
+        continue;
+      }
+
+      // Otherwise, if it is already the default model, retry
+      if (attempt < maxRetries - 1) {
+        const sleepMs = (Math.pow(2, attempt) + (Math.random() + 0.5)) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, sleepMs));
+        continue;
+      }
       return null;
 
     } catch (err: any) {
       const errorMsg = err.message.toLowerCase();
-      if ((errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('rate limit')) && attempt < maxRetries - 1) {
+      // If the API call threw a model-related error, fall back to default
+      if (
+        apiModel !== defaultModel &&
+        (errorMsg.includes('404') ||
+          errorMsg.includes('400') ||
+          errorMsg.includes('not found') ||
+          errorMsg.includes('not supported') ||
+          errorMsg.includes('unsupported') ||
+          errorMsg.includes('invalid') ||
+          errorMsg.includes('modality'))
+      ) {
+        console.warn(`[callGeminiImageAPI] Fetch threw for "${apiModel}". Falling back to "${defaultModel}". Error: ${err.message}`);
+        apiModel = defaultModel;
+        attempt--;
+        continue;
+      }
+      // Rate limit or any other transient network error (like "fetch failed", socket hang up, etc.), retry
+      if (attempt < maxRetries - 1) {
         const sleepMs = (Math.pow(2, attempt) + (Math.random() + 0.5)) * 1000;
-        console.log(`   ⏳ [API] Rate limited. Backing off ${(sleepMs / 1000).toFixed(1)}s...`);
+        console.warn(`   ⏳ [API] Request failed (${err.message}). Retrying in ${(sleepMs / 1000).toFixed(1)}s... (Attempt ${attempt + 1}/${maxRetries})`);
         await new Promise((resolve) => setTimeout(resolve, sleepMs));
         continue;
       }
@@ -179,7 +268,7 @@ async function generateVideoWithVeo(
   videoPrompt: string,
   imageBase64: string,
   imageMimeType: string,
-  videoModel: string = 'veo-2.0-generate-001',
+  videoModel: string = 'veo-3.1-generate-preview',
 ): Promise<string | null> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
 
@@ -419,7 +508,8 @@ export async function POST(req: NextRequest) {
     const refImageMime = originalAsset.path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 
     // Config
-    const imageModel = settings?.imageModel || 'gemini-2.0-flash-preview-image-generation';
+    const rawImageModel = settings?.imageModel || 'gemini-3-pro-image';
+    const imageModel = getOptimalImageModel(rawImageModel);
     const colors: string[] = (settings?.colors && settings.colors.length > 0)
       ? settings.colors
       : ['White', 'Black', 'Blue', 'Red'];
@@ -460,15 +550,28 @@ export async function POST(req: NextRequest) {
 
     const generateColor = async (colorName: string) => {
       console.log(`[Generate-Direct] Generating color: ${colorName}`);
+      const startTime = Date.now();
       try {
         const imgBuffer = await generateColorVariantWithGemini(
           geminiApiKey, imageModel, prompt, refImageBase64, refImageMime, colorName,
         );
+        const latencyMs = Date.now() - startTime;
 
         if (!imgBuffer) {
+          console.warn(`[Generate-Direct] ⚠️ No image returned by Gemini for color ${colorName} after ${latencyMs}ms using model "${imageModel}"`);
           results.push({ color: colorName, error: 'No image returned by Gemini' });
           return;
         }
+
+        // Cost estimation for this individual image based on selected model
+        let costPerImage = 0.0004;
+        if (imageModel.includes('imagen')) {
+          costPerImage = 0.0300;
+        } else if (imageModel.includes('pro')) {
+          costPerImage = 0.0015;
+        }
+
+        console.log(`[Generate-Direct] ✅ Generated color ${colorName} in ${latencyMs}ms using model "${imageModel}". Image size: ${imgBuffer.length} bytes. Estimated Image Cost: $${costPerImage.toFixed(4)}`);
 
         const safeColor = colorName.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '').toLowerCase();
         const filename = `raw_${safeColor}.png`;
@@ -485,12 +588,15 @@ export async function POST(req: NextRequest) {
           const webpFilename = `raw_${safeColor}.webp`;
           const webpPath = path.join(jobAssetDir, webpFilename);
           assertWithinStorage(webpPath);
+          const webpStartTime = Date.now();
           const webpBuffer = await sharp(imgBuffer).webp({ quality: 85, effort: 4 }).toBuffer();
+          const webpLatencyMs = Date.now() - webpStartTime;
           await writeFile(webpPath, webpBuffer);
           const webpAsset = await prisma.asset.create({
             data: { type: 'variant-webp', path: webpPath, status: 'done', jobId: job.id },
           });
           webpAssetId = webpAsset.id;
+          console.log(`[WebP] Compressed color ${colorName} in ${webpLatencyMs}ms. PNG size: ${imgBuffer.length} bytes -> WebP size: ${webpBuffer.length} bytes (${((webpBuffer.length / imgBuffer.length) * 100).toFixed(1)}% of original)`);
         } catch (webpErr: any) {
           console.warn(`[WebP] Compression failed for ${colorName}:`, webpErr.message);
         }
@@ -557,7 +663,8 @@ export async function POST(req: NextRequest) {
       // instead of blocking this HTTP request. The frontend can poll job status or
       // use SSE to receive the completion event.
       if (settings?.videoEnabled === true) {
-        const videoModel = settings?.videoModel || 'veo-2.0-generate-001';
+        const rawVideoModel = settings?.videoModel || 'veo-3.1-generate-preview';
+        const videoModel = getOptimalVideoModel(rawVideoModel);
         const videoPath = path.join(jobAssetDir, `${safePrefix}_showcase.mp4`);
         assertWithinStorage(videoPath);
 
@@ -731,7 +838,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Log cost estimate (P5.3)
-    logGenerationCost(job.id, successCount, settings?.videoEnabled === true, failedColors.length);
+    logGenerationCost(job.id, successCount, settings?.videoEnabled === true, failedColors.length, imageModel, settings?.videoModel || 'veo-3.1-generate-preview');
     log.info({ jobId: job.id, generated: successCount, failed: failedColors.length, status: finalStatus }, 'Generation complete');
 
     return NextResponse.json({

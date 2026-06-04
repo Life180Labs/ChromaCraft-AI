@@ -48,8 +48,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
   const [genSuccess, setGenSuccess] = useState('');
-  const [imageModel, setImageModel] = useState('gemini-2.0-flash-preview-image-generation');
-  const [videoModel, setVideoModel] = useState('veo-2.0-generate-001');
+  const [imageModel, setImageModel] = useState('gemini-3-pro-image');
+  const [videoModel, setVideoModel] = useState('veo-3.1-generate-preview');
 
   // Prompt preview edit
   const [showPromptEdit, setShowPromptEdit] = useState(false);

@@ -43,7 +43,7 @@ enum Role {
 // ── Gemini-first generation strategy enum ─────────────────────────────────────
 // Stability AI strategies have been removed. All generation uses Gemini APIs.
 enum GenerationStrategy {
-  GEMINI_IMAGE_EDIT     // gemini-2.0-flash-preview-image-generation (color variants)
+  GEMINI_IMAGE_EDIT     // gemini-3-pro-image (color variants)
   GEMINI_LIFESTYLE      // gemini-2.0-flash (lifestyle scene generation)
   VEO_VIDEO             // veo-3.1-generate-preview (product showcase video)
   GEMINI_SPIN           // gemini-2.0-flash (360° spin frames)
@@ -147,8 +147,8 @@ model GenerationConfig {
   job               Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
   // Gemini model selection
   strategy          GenerationStrategy @default(GEMINI_IMAGE_EDIT)
-  geminiImageModel  String             @default("gemini-2.0-flash-preview-image-generation")
-  geminiVideoModel  String             @default("veo-2.0-generate-001")
+  geminiImageModel  String             @default("gemini-3-pro-image")
+  geminiVideoModel  String             @default("veo-3.1-generate-preview")
   // Grid configuration
   colors            Json               @default("[]")
   gridCols          Int                @default(4)
@@ -218,8 +218,8 @@ model AiProvider {
 // ── Application settings (replaces the __app_settings__ AiProvider hack) ─────
 model AppSettings {
   id               Int    @id @default(1) // singleton
-  geminiImageModel String @default("gemini-2.0-flash-preview-image-generation")
-  geminiVideoModel String @default("veo-2.0-generate-001")
+  geminiImageModel String @default("gemini-3-pro-image")
+  geminiVideoModel String @default("veo-3.1-generate-preview")
   defaultGridCols  Int    @default(4)
   defaultGridRows  Int    @default(3)
   updatedAt        DateTime @updatedAt

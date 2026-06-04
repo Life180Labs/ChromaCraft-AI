@@ -8,14 +8,51 @@ import type { Provider } from '../shared/types';
 
 // ─── Model Options ────────────────────────────────────────────────────────────
 const GEMINI_IMAGE_MODELS = [
-  { value: 'gemini-3.1-flash-image', label: 'Gemini 3.1 Flash Image' },
-  { value: 'gemini-3.1-flash', label: 'Gemini 3.1 Flash' },
-  { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
-  { value: 'gemini-2.0-flash-preview-image-generation', label: 'Gemini 2.0 Flash (Image Gen)' },
-  { value: 'gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash Preview' },
-  { value: 'imagen-3.0-generate-002', label: 'Imagen 3.0 Generate' },
-  { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-  { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+  {
+    value: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    description: 'The most capable model for sustained frontier performance on agentic and coding tasks, balancing high intelligence with speed.',
+  },
+  {
+    value: 'gemini-3.1-pro-preview',
+    label: 'Gemini 3.1 Pro Preview',
+    description: 'The advanced thinking model, built for complex problem-solving, deep reasoning, and heavy analytical tasks.',
+  },
+  {
+    value: 'gemini-3.1-flash-lite',
+    label: 'Gemini 3.1 Flash Lite',
+    description: 'An ultra-fast, cost-efficient model optimized for high-volume, low-latency tasks.',
+  },
+  {
+    value: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro',
+    description: 'A highly capable previous-generation model for deep reasoning and coding.',
+  },
+  {
+    value: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
+    description: 'The best price-performance model of the 2.5 series for low-latency reasoning tasks.',
+  },
+  {
+    value: 'gemini-2.5-flash-lite',
+    label: 'Gemini 2.5 Flash Lite',
+    description: 'The fastest and most budget-friendly multimodal option in the 2.5 family.',
+  },
+  {
+    value: 'gemini-2.0-flash',
+    label: 'Gemini 2.0 Flash',
+    description: 'The next-generation production model, delivering lightning-fast speeds and high-fidelity multimodal image outputs.',
+  },
+  {
+    value: 'gemini-3-pro-image',
+    label: 'Gemini 3 Pro Image (Recommended)',
+    description: 'The latest Gemini image model for state-of-the-art generation.',
+  },
+  {
+    value: 'gemini-2.0-flash-preview-image-generation',
+    label: 'Gemini 2.0 Flash (Image Gen Preview)',
+    description: 'Preview model with native inline image generation capabilities.',
+  },
 ];
 
 const GEMINI_VIDEO_MODELS = [
@@ -114,8 +151,8 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
 
   // Model settings
-  const [geminiImageModel, setGeminiImageModel] = useState('gemini-2.0-flash-preview-image-generation');
-  const [geminiVideoModel, setGeminiVideoModel] = useState('veo-2.0-generate-001');
+  const [geminiImageModel, setGeminiImageModel] = useState('gemini-3-pro-image');
+  const [geminiVideoModel, setGeminiVideoModel] = useState('veo-3.1-generate-preview');
   const [savingModels, setSavingModels] = useState(false);
   const [modelSaveMessage, setModelSaveMessage] = useState<string | null>(null);
 
@@ -601,7 +638,27 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
-            <div style={{ fontSize: 10, color: 'var(--tx4)', fontFamily: 'monospace' }}>{geminiImageModel}</div>
+            <div style={{ fontSize: 10, color: 'var(--tx4)', fontFamily: 'monospace', marginBottom: 4 }}>{geminiImageModel}</div>
+            {(() => {
+              const selectedModel = GEMINI_IMAGE_MODELS.find(m => m.value === geminiImageModel);
+              if (selectedModel?.description) {
+                return (
+                  <div style={{
+                    fontSize: 11,
+                    color: 'var(--tx3)',
+                    lineHeight: '1.4',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    marginTop: 4
+                  }}>
+                    {selectedModel.description}
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
 
           {/* Video Model */}

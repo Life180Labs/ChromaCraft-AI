@@ -15,12 +15,13 @@ import { NextResponse } from 'next/server';
  */
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const userId = await getUserId(request as any);
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-  const jobId = Number(params.id);
+  const { id } = await params;
+  const jobId = Number(id);
   if (isNaN(jobId) || jobId <= 0) {
     return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
   }

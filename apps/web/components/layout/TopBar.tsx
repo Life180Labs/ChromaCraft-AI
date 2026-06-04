@@ -21,43 +21,78 @@ const navTabs: { id: TabId; label: string; icon?: boolean }[] = [
 ];
 
 export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange, onToggleNight, nightMode = false, onProfileClick, userInitials = 'AG' }) => {
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+
   return (
-    <nav className="topbar">
-      <button className="logo-btn" onClick={() => onTabChange('home')}>
-        <div className="logo-icon-sm">
-          <svg viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="3" width="14" height="10" rx="2" stroke="var(--acc)" strokeWidth="1.2" />
-            <rect x="2.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".9" />
-            <rect x="6.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".65" />
-            <rect x="10.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".4" />
-          </svg>
-        </div>
-        <div>
-          <div className="logo-text-sm">Chroma<span>Craft</span></div>
-          <div className="logo-by-sm">by Life180 Labs</div>
-        </div>
-      </button>
-      <div className="nav-links" id="nav-links">
-        {navTabs.map((t) => (
-          <button
-            key={t.id}
-            className={`nav-tab ${activeTab === t.id ? 'active' : ''}`}
-            onClick={() => onTabChange(t.id)}
-          >
-            {t.icon && <TbHome className="ti" style={{ fontSize: '13px', verticalAlign: '-2px', marginRight: '3px' }} />}
-            {t.label}
-            {t.id === 'setup' && <span className="tab-badge">+</span>}
-          </button>
-        ))}
-      </div>
-      <div className="topbar-right">
-        <button className="night-btn" onClick={onToggleNight} id="night-btn">
-          <TbMoon className="ti" id="night-icon" />
-          <span className="hide-xs">Night</span>
+    <>
+      <nav className="topbar">
+        <button className="logo-btn" onClick={() => onTabChange('home')}>
+          <div className="logo-icon-sm">
+            <svg viewBox="0 0 16 16" fill="none">
+              <rect x="1" y="3" width="14" height="10" rx="2" stroke="var(--acc)" strokeWidth="1.2" />
+              <rect x="2.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".9" />
+              <rect x="6.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".65" />
+              <rect x="10.5" y="5" width="3" height="6" rx="1" fill="var(--acc)" opacity=".4" />
+            </svg>
+          </div>
+          <div>
+            <div className="logo-text-sm">Chroma<span>Craft</span></div>
+            <div className="logo-by-sm">by Life180 Labs</div>
+          </div>
         </button>
-        <button className="user-btn" onClick={onProfileClick} id="user-avatar" title="Profile & settings">{userInitials}</button>
-        <button className="hamburger" onClick={() => { const mobileNav = document.getElementById('mobile-nav'); if (mobileNav) mobileNav.classList.toggle('open'); }} aria-label="Menu"><TbMenu2 className="ti" /></button>
+        <div className="nav-links" id="nav-links">
+          {navTabs.map((t) => (
+            <button
+              key={t.id}
+              className={`nav-tab ${activeTab === t.id ? 'active' : ''}`}
+              onClick={() => onTabChange(t.id)}
+            >
+              {t.icon && <TbHome className="ti" style={{ fontSize: '13px', verticalAlign: '-2px', marginRight: '3px' }} />}
+              {t.label}
+              {t.id === 'setup' && <span className="tab-badge">+</span>}
+            </button>
+          ))}
+        </div>
+        <div className="topbar-right">
+          <button className="night-btn" onClick={onToggleNight} id="night-btn">
+            <TbMoon className="ti" id="night-icon" />
+            <span className="hide-xs">Night</span>
+          </button>
+          <button className="user-btn" onClick={onProfileClick} id="user-avatar" title="Profile & settings">{userInitials}</button>
+          <button className="hamburger" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Menu"><TbMenu2 className="ti" /></button>
+        </div>
+      </nav>
+
+      {/* Mobile nav drawer */}
+      <div 
+        id="mobile-nav" 
+        className={`mobile-drawer ${mobileOpen ? 'open' : ''}`}
+        onClick={() => setMobileOpen(false)}
+      >
+        <div className="mobile-drawer-content" onClick={(e) => e.stopPropagation()}>
+          <div className="mobile-drawer-header">
+            <div className="logo-text-sm">Chroma<span>Craft</span></div>
+            <button className="close-btn" onClick={() => setMobileOpen(false)}>×</button>
+          </div>
+          <div className="mobile-drawer-links">
+            {navTabs.map((t) => (
+              <button
+                key={t.id}
+                className={`mobile-drawer-tab ${activeTab === t.id ? 'active' : ''}`}
+                onClick={() => {
+                  onTabChange(t.id);
+                  setMobileOpen(false);
+                }}
+              >
+                {t.icon && <TbHome className="ti" style={{ fontSize: '15px', marginRight: '6px' }} />}
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-    </nav>
+    </>
   );
 };
+
+

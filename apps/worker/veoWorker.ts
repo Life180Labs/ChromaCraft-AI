@@ -166,18 +166,32 @@ export const veoVideoWorker = new Worker('veo-video', async (job: BullJob) => {
   const refImageBase64 = refImageBuffer.toString('base64');
 
   try {
+    const startTime = Date.now();
     const videoUri = await generateVideoWithVeo(
       geminiApiKey, videoPrompt, refImageBase64, refImageMime, videoModel,
     );
     if (!videoUri) throw new Error('No video URI returned');
 
+    const downloadStartTime = Date.now();
     const videoBuffer = await downloadVideoFromUri(geminiApiKey, videoUri);
+    const downloadLatency = Date.now() - downloadStartTime;
+    const totalLatency = Date.now() - startTime;
     await fs.promises.writeFile(videoPath, videoBuffer);
 
     await prisma.asset.deleteMany({ where: { jobId, type: 'video' } });
     await prisma.asset.create({ data: { jobId, type: 'video', path: videoPath, status: 'done' } });
 
+    // Cost estimation for this specific video based on model selected
+    let costPerSecond = 0.35;
+    if (videoModel.includes('3.1') || videoModel.includes('3.0')) {
+      costPerSecond = (videoModel.includes('preview') || videoModel.includes('lite')) ? 0.05 : 0.35;
+    } else if (videoModel.includes('2.0')) {
+      costPerSecond = videoModel.includes('preview') ? 0.03 : 0.35;
+    }
+    const estimatedCostUSD = costPerSecond * 8; // default 8s
+
     console.log(`[VeoWorker] ✅ Video saved: ${videoPath} (${videoBuffer.length} bytes)`);
+    console.log(`[VeoWorker] [COST] Job ${jobId} video completed using model "${videoModel}". Video duration: 8s. Cost per second: $${costPerSecond.toFixed(4)}. Estimated Video Cost: $${estimatedCostUSD.toFixed(4)}. Generation latency: ${(totalLatency / 1000).toFixed(1)}s (download latency: ${(downloadLatency / 1000).toFixed(1)}s).`);
     return { success: true, path: videoPath };
   } catch (err: any) {
     console.error(`[VeoWorker] Veo failed: ${err.message}. Generating fallback still...`);
