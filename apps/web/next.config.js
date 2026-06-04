@@ -2,8 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  // Disable telemetry
-  telemetry: false,
 
   // Security headers applied to all routes
   async headers() {
