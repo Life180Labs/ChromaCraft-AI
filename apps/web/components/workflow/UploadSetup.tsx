@@ -213,8 +213,9 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
   };
 
   return (
-    <div className="screen active" style={{ maxWidth: '800px', margin: '0 auto' }}>
-      {/* High-level Stepper */}
+    <>
+      <div className="screen active" style={{ maxWidth: '800px', margin: '0 auto' }}>
+        {/* High-level Stepper */}
       <div className="stepper-wrap" style={{ marginBottom: '24px' }}>
         <div className="stepper" style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', maxWidth: '500px', margin: '0 auto' }}>
           {/* Step 1: Configure */}
@@ -471,7 +472,7 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
                 </div>
 
                 {/* Color selectors list */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols}, 1fr)`, gap: '6px', marginTop: '10px' }}>
                   {Array.from({ length: totalVariants }).map((_, idx) => {
                     const currentColor = customColors[idx] || UC1_STANDARD_COLORS[idx % UC1_STANDARD_COLORS.length];
                     return (
@@ -727,6 +728,7 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
           <a href="#" style={{ color: 'var(--tx3)', textDecoration: 'none' }}>Life180labs.com</a>
         </div>
       </div>
+      </div>
 
       {/* ── MODAL: UPLOAD SOURCE SELECTOR ── */}
       <div className={`overlay ${showUploadModal ? 'open' : ''}`}>
@@ -922,6 +924,6 @@ export const UploadSetup: React.FC<UploadSetupProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
