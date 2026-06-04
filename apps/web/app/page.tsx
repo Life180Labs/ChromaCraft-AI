@@ -118,7 +118,8 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
   useEffect(() => {
     if (activeTab !== 'generate' && activeTab !== 'review') return;
     if (!selectedJob) return;
-    if (selectedJob.status !== 'PENDING' && selectedJob.status !== 'PROCESSING') return;
+    const hasPendingAssets = selectedJob.assets?.some((a: any) => a.status === 'pending');
+    if (selectedJob.status !== 'PENDING' && selectedJob.status !== 'PROCESSING' && !hasPendingAssets) return;
 
     const interval = setInterval(async () => {
       try {
@@ -129,7 +130,8 @@ ${audienceDesc ? audienceDesc + '\n' : ''}${purposeDesc ? purposeDesc + '\n' : '
             setSelectedJob(currentJob);
             // Update the job in the jobs list too
             setJobs(prev => prev.map(j => j.id === currentJob.id ? currentJob : j));
-            if (currentJob.status !== 'PENDING' && currentJob.status !== 'PROCESSING') {
+            const currentHasPendingAssets = currentJob.assets?.some((a: any) => a.status === 'pending');
+            if (currentJob.status !== 'PENDING' && currentJob.status !== 'PROCESSING' && !currentHasPendingAssets) {
               clearInterval(interval);
             }
           }
